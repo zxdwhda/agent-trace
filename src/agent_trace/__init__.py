@@ -9,7 +9,7 @@ AgentTrace - AI IDE 会话监控与 Trace 上报工具
 try:
     from ._version import __version__
 except ImportError:
-    __version__ = "0.3.2"
+    __version__ = "0.3.3"
 
 __author__ = "AgentTrace Contributors"
 __license__ = "MIT"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AgentTrace 监控服务（v0.3.1 增强版）
+AgentTrace 监控服务（v0.3.2）
 
 新特性：
 1. 事件去重机制（借鉴 LangSmith run_id 幂等性）
@@ -12,7 +12,6 @@ AgentTrace 监控服务（v0.3.1 增强版）
 
 import os
 import time
-import signal
 from pathlib import Path
 from typing import Dict, Optional
 import logging
@@ -100,7 +99,7 @@ class AgentTraceMonitor:
     def start(self):
         """启动监控服务"""
         logger.info("=" * 60)
-        logger.info("AgentTrace Monitor v0.3.1 Starting...")
+        logger.info("AgentTrace Monitor v0.3.2 Starting...")
         logger.info(f"Sessions dir: {self.sessions_dir}")
         logger.info(f"Poll interval: {self.poll_interval}s")
         logger.info(f"Deduplication: {'enabled' if self.enable_deduplication else 'disabled'}")
@@ -368,16 +367,21 @@ class AgentTraceMonitor:
         # 解析事件
         event = WireEvent.from_record(record)
         if not event:
+            # 记录原始数据以便调试
+            record_type = record.get('type', 'unknown')
+            if record_type != 'metadata':
+                logger.debug(f"[PROCESS] 无法解析事件: type={record_type}, keys={list(record.keys())}")
             return
         
         # 获取处理器
         handler = self.handlers.get(event.event_type)
         if not handler:
+            logger.debug(f"[PROCESS] 无处理器: {event.event_type}")
             return
         
         # 处理事件
         try:
-            handler.handle(state, event)
+            result = handler.handle(state, event)
             
             # 日志记录关键事件
             if event.event_type == WireEventType.TURN_BEGIN:
@@ -386,13 +390,19 @@ class AgentTraceMonitor:
                     preview = user_input[:50] + "..." if len(user_input) > 50 else user_input
                 else:
                     preview = "[complex input]"
-                logger.info(f"[EVENT:{session_id[:8]}] TurnBegin: {preview}")
+                root_span_status = "✓" if state.root_span else "✗"
+                logger.info(f"[EVENT:{session_id[:8]}] TurnBegin: {preview} (root_span={root_span_status})")
+            
+            elif event.event_type == WireEventType.STEP_BEGIN:
+                step_n = event.payload.get('n', 0)
+                current_step_status = "✓" if state.current_step else "✗"
+                logger.info(f"[EVENT:{session_id[:8]}] StepBegin: step={step_n} (current_step={current_step_status})")
             
             elif event.event_type == WireEventType.TURN_END:
                 logger.info(f"[EVENT:{session_id[:8]}] TurnEnd - Trace completed")
         
         except Exception as e:
-            logger.error(f"[EVENT:{session_id[:8]}] Error handling event {event.event_type}: {e}")
+            logger.error(f"[EVENT:{session_id[:8]}] Error handling event {event.event_type}: {e}", exc_info=True)
     
     def get_stats(self) -> Dict:
         """获取监控统计信息"""

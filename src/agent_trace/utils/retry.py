@@ -91,6 +91,6 @@ def retry_sdk_call(max_retries: int = 3, initial_delay: float = 1.0):
             ConnectionError,
             TimeoutError,
             OSError,
-            Exception,  # 作为兜底，捕获 SDK 可能抛出的各种异常
+            # 注意：不要捕获 Exception，以免拦截 KeyboardInterrupt
         )
     )

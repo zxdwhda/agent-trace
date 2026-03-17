@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from .dedup import FileFingerprint
 
 logger = logging.getLogger("agent_trace")
 
@@ -49,10 +48,10 @@ class PersistentOffsetStore:
         初始化 Offset 存储
         
         Args:
-            db_path: SQLite 数据库路径，默认 ~/.kimi/monitor/offsets.db
+            db_path: SQLite 数据库路径，默认 ~/.agenttrace/offsets.db
         """
         if db_path is None:
-            db_dir = Path.home() / ".kimi" / "monitor"
+            db_dir = Path.home() / ".agenttrace"
             db_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(db_dir / "offsets.db")
         

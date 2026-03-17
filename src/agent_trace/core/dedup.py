@@ -7,12 +7,14 @@
 """
 
 import hashlib
+import os
 import sqlite3
 import threading
 import time
 import logging
+from collections import OrderedDict
 from pathlib import Path
-from typing import Optional, Set, Dict, Any
+from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger("agent_trace")
@@ -25,12 +27,13 @@ class EventID:
     turn_index: int
     step_n: int
     event_type: str
+    timestamp: int = 0  # 添加时间戳字段以确保唯一性
     
     def to_string(self) -> str:
         """生成确定性事件 ID"""
-        return hashlib.sha256(
-            f"{self.session_id}:turn:{self.turn_index}:step:{self.step_n}:type:{self.event_type}".encode()
-        ).hexdigest()[:32]
+        # 如果有时间戳，使用它来确保唯一性
+        unique_key = f"{self.session_id}:turn:{self.turn_index}:step:{self.step_n}:ts:{self.timestamp}:type:{self.event_type}"
+        return hashlib.sha256(unique_key.encode()).hexdigest()[:32]
 
 
 class EventDeduplicator:
@@ -62,9 +65,8 @@ class EventDeduplicator:
         self.memory_cache_size = memory_cache_size
         self.ttl_hours = ttl_hours
         
-        # 内存缓存（L1）：存储最近处理的事件 ID
-        self._memory_cache: Set[str] = set()
-        self._memory_cache_order: list = []  # 用于 LRU 淘汰
+        # 内存缓存（L1）：使用 OrderedDict 实现真正的 LRU
+        self._memory_cache: OrderedDict[str, None] = OrderedDict()
         
         # 统计信息
         self._stats = {
@@ -134,6 +136,8 @@ class EventDeduplicator:
             
             # L1: 内存缓存快速检查
             if event_id in self._memory_cache:
+                # LRU: 移到末尾（最近使用）
+                self._memory_cache.move_to_end(event_id)
                 self._stats["memory_hits"] += 1
                 self._stats["duplicates"] += 1
                 logger.debug(f"[DEDUP] Memory cache hit: {event_id[:16]}...")
@@ -202,16 +206,15 @@ class EventDeduplicator:
     def _add_to_memory_cache(self, event_id: str):
         """添加事件 ID 到内存缓存（LRU 淘汰）"""
         if event_id in self._memory_cache:
+            # 已存在，更新为最近使用
+            self._memory_cache.move_to_end(event_id)
             return
         
-        # 淘汰旧条目
+        # 淘汰最旧的条目
         while len(self._memory_cache) >= self.memory_cache_size:
-            if self._memory_cache_order:
-                oldest = self._memory_cache_order.pop(0)
-                self._memory_cache.discard(oldest)
+            self._memory_cache.popitem(last=False)
         
-        self._memory_cache.add(event_id)
-        self._memory_cache_order.append(event_id)
+        self._memory_cache[event_id] = None
     
     def cleanup_expired(self) -> int:
         """
@@ -319,7 +322,6 @@ class FileFingerprint:
     def compute(self) -> Dict[str, Any]:
         """计算文件指纹"""
         try:
-            import os
             stat = os.stat(self.filepath)
             
             self._inode = stat.st_ino

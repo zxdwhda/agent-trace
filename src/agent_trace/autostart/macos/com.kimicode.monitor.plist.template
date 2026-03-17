@@ -3,15 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.kimicode.monitor</string>
+    <string>com.agenttrace.monitor</string>
     
     <key>ProgramArguments</key>
     <array>
-        <string>{{PYTHON_PATH}}</string>
-        <string>-m</string>
-        <string>kimi_monitor</string>
-        <string>--log-level</string>
-        <string>INFO</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>export $(grep -v '^#' {{ENV_FILE_PATH}} | xargs) &amp;&amp; {{PYTHON_PATH}} -m agent_trace --log-level INFO</string>
     </array>
     
     <key>WorkingDirectory</key>
@@ -19,18 +17,6 @@
     
     <key>EnvironmentVariables</key>
     <dict>
-        <key>COZELOOP_WORKSPACE_ID</key>
-        <string>{{COZELOOP_WORKSPACE_ID}}</string>
-        <key>COZELOOP_API_TOKEN</key>
-        <string>{{COZELOOP_API_TOKEN}}</string>
-        <key>COZELOOP_API_BASE</key>
-        <string>{{COZELOOP_API_BASE}}</string>
-        <key>KIMI_SESSIONS_DIR</key>
-        <string>{{KIMI_SESSIONS_DIR}}</string>
-        <key>KIMI_POLL_INTERVAL</key>
-        <string>{{KIMI_POLL_INTERVAL}}</string>
-        <key>KIMI_LOG_FILE</key>
-        <string>{{KIMI_LOG_FILE}}</string>
         <key>PYTHONPATH</key>
         <string>{{PYTHONPATH}}</string>
     </dict>
@@ -50,10 +36,10 @@
     <integer>10</integer>
     
     <key>StandardOutPath</key>
-    <string>{{LOG_DIR}}/kimi-monitor.stdout.log</string>
+    <string>{{LOG_DIR}}/agent-trace.stdout.log</string>
     
     <key>StandardErrorPath</key>
-    <string>{{LOG_DIR}}/kimi-monitor.stderr.log</string>
+    <string>{{LOG_DIR}}/agent-trace.stderr.log</string>
     
     <key>ProcessType</key>
     <string>Background</string>

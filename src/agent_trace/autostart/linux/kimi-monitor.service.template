@@ -1,6 +1,6 @@
 [Unit]
-Description=Kimi Code CLI Monitor for Coze Compass
-Documentation=https://github.com/your-repo/kimi-monitor
+Description=AgentTrace - AI IDE Session Monitor for Coze Compass
+Documentation=https://github.com/your-repo/agent-trace
 After=network.target
 Wants=network.target
 
@@ -10,17 +10,15 @@ User={{USER}}
 Group={{GROUP}}
 WorkingDirectory={{WORKING_DIR}}
 
-# Environment variables
-Environment="COZELOOP_WORKSPACE_ID={{COZELOOP_WORKSPACE_ID}}"
-Environment="COZELOOP_API_TOKEN={{COZELOOP_API_TOKEN}}"
-Environment="COZELOOP_API_BASE={{COZELOOP_API_BASE}}"
-Environment="KIMI_SESSIONS_DIR={{KIMI_SESSIONS_DIR}}"
-Environment="KIMI_POLL_INTERVAL={{KIMI_POLL_INTERVAL}}"
-Environment="KIMI_LOG_FILE={{KIMI_LOG_FILE}}"
+# Load environment variables from secure file
+# Note: Create this file with your API credentials
+EnvironmentFile={{ENV_FILE_PATH}}
+
+# Non-sensitive environment variables
 Environment="PYTHONPATH={{PYTHONPATH}}"
 
 # Python executable and module
-ExecStart={{PYTHON_PATH}} -m kimi_monitor --log-level INFO
+ExecStart={{PYTHON_PATH}} -m agent_trace --log-level INFO
 ExecReload=/bin/kill -HUP $MAINPID
 
 # Restart policy
@@ -44,9 +42,9 @@ ProtectSystem=no
 ProtectHome=no
 
 # Logging
-StandardOutput=append:{{LOG_DIR}}/kimi-monitor.stdout.log
-StandardError=append:{{LOG_DIR}}/kimi-monitor.stderr.log
-SyslogIdentifier=kimi-monitor
+StandardOutput=append:{{LOG_DIR}}/agent-trace.stdout.log
+StandardError=append:{{LOG_DIR}}/agent-trace.stderr.log
+SyslogIdentifier=agent-trace
 
 [Install]
 WantedBy=multi-user.target

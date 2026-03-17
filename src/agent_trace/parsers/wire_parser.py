@@ -5,7 +5,7 @@ Wire 协议解析器
 解析 Kimi CLI 的 Wire 协议事件
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
@@ -15,6 +15,7 @@ class WireEventType(Enum):
     TURN_BEGIN = "TurnBegin"
     TURN_END = "TurnEnd"
     STEP_BEGIN = "StepBegin"
+    STEP_INTERRUPTED = "StepInterrupted"  # 步骤中断事件
     CONTENT_PART = "ContentPart"
     TOOL_CALL = "ToolCall"
     TOOL_RESULT = "ToolResult"
@@ -35,17 +36,29 @@ class WireEvent:
     @classmethod
     def from_record(cls, record: Dict[str, Any]) -> Optional["WireEvent"]:
         """从原始记录解析事件"""
+        import logging
+        logger = logging.getLogger("agent_trace")
+        
+        # 检查 metadata 类型
+        record_type = record.get('type')
+        if record_type == 'metadata':
+            return None
+        
         message = record.get('message', {})
         msg_type = message.get('type')
         
         if not msg_type:
+            logger.debug(f"[WIRE] 跳过无类型消息: {record.keys()}")
             return None
         
         try:
             event_type = WireEventType(msg_type)
         except ValueError:
-            # 未知事件类型
+            # 未知事件类型，记录日志以便调试
+            logger.debug(f"[WIRE] 未知事件类型: {msg_type}")
             return None
+        
+        logger.debug(f"[WIRE] 解析事件: {msg_type}")
         
         return cls(
             timestamp=record.get('timestamp', 0),
@@ -128,7 +141,7 @@ class WireParser:
             return_value.get('content', '') or
             return_value.get('result', '') or
             return_value.get('data', '') or
-            str(return_value) if return_value else ''
+            (str(return_value) if return_value else '')
         )
         
         # 尝试多种可能的字段名获取错误状态

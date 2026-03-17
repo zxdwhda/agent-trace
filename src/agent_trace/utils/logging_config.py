@@ -5,10 +5,11 @@
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def setup_logging(log_level: str = "INFO", log_file: str = "/tmp/kimi-cozeloop.log") -> logging.Logger:
+def setup_logging(log_level: str = "INFO", log_file: str = "/tmp/agent-trace.log") -> logging.Logger:
     """
     配置日志系统
     
@@ -54,7 +55,13 @@ def setup_logging(log_level: str = "INFO", log_file: str = "/tmp/kimi-cozeloop.l
                 log_path = fallback_path
         
         try:
-            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+            # 使用 RotatingFileHandler 限制日志文件大小（10MB，保留5个备份）
+            file_handler = RotatingFileHandler(
+                log_path, 
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5,          # 保留5个备份
+                encoding="utf-8"
+            )
             file_handler.setLevel(log_level_value)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
@@ -63,7 +70,12 @@ def setup_logging(log_level: str = "INFO", log_file: str = "/tmp/kimi-cozeloop.l
             # 尝试使用 /tmp 作为回退
             try:
                 fallback_path = Path('/tmp') / log_path.name
-                file_handler = logging.FileHandler(fallback_path, encoding="utf-8")
+                file_handler = RotatingFileHandler(
+                    fallback_path,
+                    maxBytes=10*1024*1024,
+                    backupCount=5,
+                    encoding="utf-8"
+                )
                 file_handler.setLevel(log_level_value)
                 file_handler.setFormatter(formatter)
                 logger.addHandler(file_handler)

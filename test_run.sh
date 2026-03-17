@@ -5,7 +5,7 @@ set -e
 
 echo "=========================================="
 echo "AgentTrace v0.3.2 测试启动"
-echo "==========================================
+echo "=========================================="
 
 # 设置环境变量（请修改为你自己的值）
 export COZELOOP_WORKSPACE_ID="${COZELOOP_WORKSPACE_ID:-请替换为你的workspace_id}"
@@ -40,7 +40,7 @@ echo "✅ 数据库已重置"
 
 # 启动新版本
 echo ""
-echo "=== 启动 AgentTrace v0.3.1 ==="
+echo "=== 启动 AgentTrace v0.3.2 ==="
 cd "$(dirname "$0")"
 export PYTHONPATH="$(pwd)/src:$PYTHONPATH"
 

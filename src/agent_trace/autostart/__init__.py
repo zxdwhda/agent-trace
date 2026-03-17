@@ -30,7 +30,13 @@ class AutoStartManager:
     def _get_config(self) -> Dict[str, str]:
         """获取配置信息"""
         import getpass
-        import grp
+        
+        # 尝试导入 grp 模块（Unix 特有，Windows 上不存在）
+        try:
+            import grp
+            has_grp = True
+        except ImportError:
+            has_grp = False
         
         # 获取 Python 路径
         python_path = sys.executable
@@ -39,29 +45,108 @@ class AutoStartManager:
         working_dir = str(self.project_root)
         
         # 日志目录
-        log_dir = str(Path.home() / ".kimi" / "monitor" / "logs")
+        log_dir = str(Path.home() / ".agenttrace" / "logs")
         os.makedirs(log_dir, exist_ok=True)
         
-        # 环境变量
+        # 获取用户名
+        user = getpass.getuser()
+        
+        # 获取组名：Unix/Linux 使用 grp 模块，Windows 使用用户名作为组名
+        if has_grp and hasattr(os, 'getgid'):
+            try:
+                group = grp.getgrgid(os.getgid()).gr_name
+            except (KeyError, OSError):
+                group = user
+        else:
+            group = user
+        
+        # 环境变量（非敏感配置）
+        # 注意：敏感信息（API Token等）通过 EnvironmentFile 从 ~/.agenttrace/.env 加载
         env_vars = {
             "PYTHON_PATH": python_path,
             "WORKING_DIR": working_dir,
             "LOG_DIR": log_dir,
-            "USER": getpass.getuser(),
-            "GROUP": grp.getgrgid(os.getgid()).gr_name if hasattr(os, 'getgid') else getpass.getuser(),
+            "USER": user,
+            "GROUP": group,
             "PYTHONPATH": working_dir,
-            "COZELOOP_WORKSPACE_ID": os.getenv("COZELOOP_WORKSPACE_ID", ""),
-            "COZELOOP_API_TOKEN": os.getenv("COZELOOP_API_TOKEN", ""),
-            "COZELOOP_API_BASE": os.getenv("COZELOOP_API_BASE", "https://api.coze.cn"),
-            "KIMI_SESSIONS_DIR": os.getenv("KIMI_SESSIONS_DIR", str(Path.home() / ".kimi" / "sessions")),
-            "KIMI_POLL_INTERVAL": os.getenv("KIMI_POLL_INTERVAL", "2.0"),
-            "KIMI_LOG_FILE": os.getenv("KIMI_LOG_FILE", "/tmp/kimi-cozeloop.log"),
+            # 敏感信息不再直接写入服务配置
+            "ENV_FILE_PATH": str(Path.home() / ".agenttrace" / ".env"),
         }
         
         return env_vars
     
+    def _ensure_env_file(self) -> bool:
+        """确保 .env 文件存在，如果不存在则创建模板"""
+        env_dir = Path.home() / ".agenttrace"
+        env_file = env_dir / ".env"
+        
+        # 创建目录
+        env_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not env_file.exists():
+            # 创建模板文件
+            template_content = """# Agent Trace Environment Configuration
+# 请填写你的 CozeLoop API 配置
+# 注意：此文件包含敏感信息，请勿共享或提交到版本控制
+
+# CozeLoop API Token（从 CozeLoop 控制台获取）
+COZELOOP_API_TOKEN=your_api_token_here
+
+# CozeLoop Workspace ID（从 CozeLoop 控制台获取）
+COZELOOP_WORKSPACE_ID=your_workspace_id_here
+
+# CozeLoop API Base URL（可选，默认使用官方地址）
+COZELOOP_API_BASE=https://api.coze.cn
+
+# Kimi 会话目录（可选，默认使用系统默认路径）
+KIMI_SESSIONS_DIR=
+
+# 轮询间隔（秒，可选）
+KIMI_POLL_INTERVAL=2.0
+
+# 日志文件路径（可选）
+KIMI_LOG_FILE=
+"""
+            try:
+                with open(env_file, 'w', encoding='utf-8') as f:
+                    f.write(template_content)
+                # 设置文件权限，仅所有者可读写 (Unix/Linux/macOS)
+                if self.system != "Windows":
+                    os.chmod(env_file, 0o600)
+                print(f"[INFO] 已创建环境变量模板文件: {env_file}")
+                print("[WARN] 请先编辑此文件，填写你的 COZELOOP_API_TOKEN 和 COZELOOP_WORKSPACE_ID")
+                return False
+            except Exception as e:
+                print(f"[ERROR] 创建 .env 文件失败: {e}")
+                return False
+        
+        # 检查文件是否包含有效的 API Token
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 检查是否有占位符
+            if "your_api_token_here" in content or "your_workspace_id_here" in content:
+                print(f"[WARN] .env 文件包含未配置的占位符: {env_file}")
+                print("[WARN] 请先编辑此文件，填写你的 COZELOOP_API_TOKEN 和 COZELOOP_WORKSPACE_ID")
+                return False
+            
+            # 检查是否有 API Token
+            if "COZELOOP_API_TOKEN=" not in content:
+                print(f"[WARN] .env 文件缺少 COZELOOP_API_TOKEN: {env_file}")
+                return False
+            
+            return True
+        except Exception as e:
+            print(f"[ERROR] 读取 .env 文件失败: {e}")
+            return False
+    
     def install(self) -> bool:
         """安装自启动"""
+        # 首先检查/创建 .env 文件
+        if not self._ensure_env_file():
+            return False
+            
         if self.system == "Darwin":
             return self._install_macos()
         elif self.system == "Linux":
@@ -123,6 +208,7 @@ class AutoStartManager:
             print(f"[OK] macOS auto-start installed")
             print(f"     Plist: {plist_path}")
             print(f"     Logs: {self.config['LOG_DIR']}")
+            print(f"     Env File: {self.config['ENV_FILE_PATH']}")
             return True
             
         except Exception as e:
@@ -231,6 +317,7 @@ class AutoStartManager:
             print(f"[OK] Linux auto-start installed")
             print(f"     Service: {service_path}")
             print(f"     Logs: {self.config['LOG_DIR']}")
+            print(f"     Env File: {self.config['ENV_FILE_PATH']}")
             return True
             
         except Exception as e:

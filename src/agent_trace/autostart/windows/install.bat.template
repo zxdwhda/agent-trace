@@ -18,17 +18,18 @@ if %errorLevel% neq 0 (
 )
 
 :: Configuration
-set "SERVICE_NAME=KimiMonitor"
-set "DISPLAY_NAME=Kimi Code CLI Monitor"
+set "SERVICE_NAME=AgentTrace"
+set "DISPLAY_NAME=AgentTrace"
 set "PYTHON_PATH={{PYTHON_PATH}}"
 set "WORKING_DIR={{WORKING_DIR}}"
 set "LOG_DIR={{LOG_DIR}}"
+set "ENV_FILE_PATH={{ENV_FILE_PATH}}"
 
 :: Create log directory
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
-:: Create wrapper script
-set "WRAPPER_SCRIPT=%WORKING_DIR%\kimi_monitor_service.py"
+:: Create wrapper script with .env file loading
+set "WRAPPER_SCRIPT=%WORKING_DIR%\agent_trace_service.py"
 (
 echo #!/usr/bin/env python3
 echo # Windows Service Wrapper for Kimi Monitor
@@ -44,18 +45,23 @@ echo.
 echo # Add project to path
 echo sys.path.insert(0, r"%WORKING_DIR%")
 echo.
-echo # Set environment variables
-echo os.environ["COZELOOP_WORKSPACE_ID"] = "{{COZELOOP_WORKSPACE_ID}}"
-echo os.environ["COZELOOP_API_TOKEN"] = "{{COZELOOP_API_TOKEN}}"
-echo os.environ["COZELOOP_API_BASE"] = "{{COZELOOP_API_BASE}}"
-echo os.environ["KIMI_SESSIONS_DIR"] = "{{KIMI_SESSIONS_DIR}}"
-echo os.environ["KIMI_POLL_INTERVAL"] = "{{KIMI_POLL_INTERVAL}}"
-echo os.environ["KIMI_LOG_FILE"] = "{{KIMI_LOG_FILE}}"
+echo # Load environment variables from .env file
+echo env_file = r"%ENV_FILE_PATH%"
+echo if os.path.exists(env_file):
+echo     with open(env_file, 'r', encoding='utf-8') as f:
+echo         for line in f:
+echo             line = line.strip()
+echo             if line and not line.startswith('#') and '=' in line:
+echo                 key, value = line.split('=', 1)
+echo                 os.environ[key] = value
+echo else:
+echo     # Fallback: check if env vars are already set
+echo     pass
 echo.
-echo class KimiMonitorService(win32serviceutil.ServiceFramework):
-echo     _svc_name_ = "%SERVICE_NAME%"
-echo     _svc_display_name_ = "%DISPLAY_NAME%"
-echo     _svc_description_ = "Kimi Code CLI Session Monitor for Coze Compass"
+echo class AgentTraceService(win32serviceutil.ServiceFramework):
+echo     _svc_name_ = "AgentTrace"
+echo     _svc_display_name_ = "AgentTrace Service"
+echo     _svc_description_ = "AI IDE Session Monitor for Coze Compass"
 echo.
 echo     def __init__(self, args):
 echo         win32serviceutil.ServiceFramework.__init__(self, args)
@@ -77,8 +83,8 @@ echo         )
 echo         self.main()
 echo.
 echo     def main(self):
-echo         from kimi_monitor.core.monitor import KimiSessionMonitor
-echo         from kimi_monitor.utils.config import Config
+echo         from agent_trace.core.monitor import KimiSessionMonitor
+echo         from agent_trace.utils.config import Config
 echo.
 echo         config = Config()
 echo         self.monitor = KimiSessionMonitor(
@@ -90,14 +96,22 @@ echo.
 echo if __name__ == "__main__":
 echo     if len(sys.argv) == 1:
 echo         servicemanager.Initialize()
-echo         servicemanager.PrepareToHostSingle(KimiMonitorService)
+echo         servicemanager.PrepareToHostSingle(AgentTraceService)
 echo         servicemanager.StartServiceCtrlDispatcher()
 echo     else:
-echo         win32serviceutil.HandleCommandLine(KimiMonitorService)
+echo         win32serviceutil.HandleCommandLine(AgentTraceService)
 ) > "%WRAPPER_SCRIPT%"
 
 echo [OK] Created service wrapper script
 echo.
+
+:: Check if .env file exists and is configured
+if not exist "%ENV_FILE_PATH%" (
+    echo [ERROR] Environment file not found: %ENV_FILE_PATH%
+    echo [INFO] Please create this file with your COZELOOP_API_TOKEN and COZELOOP_WORKSPACE_ID
+    pause
+    exit /b 1
+)
 
 :: Install Python service dependencies
 echo Installing dependencies...

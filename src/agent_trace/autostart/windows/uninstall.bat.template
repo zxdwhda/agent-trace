@@ -17,9 +17,9 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-set "SERVICE_NAME=KimiMonitor"
+set "SERVICE_NAME=AgentTrace"
 set "WORKING_DIR={{WORKING_DIR}}"
-set "WRAPPER_SCRIPT=%WORKING_DIR%\kimi_monitor_service.py"
+set "WRAPPER_SCRIPT=%WORKING_DIR%\agent_trace_service.py"
 
 :: Stop service if running
 echo Stopping service...

@@ -7,6 +7,136 @@
 
 ---
 
+## [0.3.3] - 2026-03-18
+
+### 🔧 核心 Bug 修复（13+ 项）
+
+#### 🔴 高优先级修复
+
+1. **修复事件 ID 生成问题**
+   - **问题**: 事件 ID 仅基于 `session_id + turn_index + step_n + event_type` 生成，导致同一 turn 内的重复事件无法区分
+   - **修复**: 在 `EventID` 类中添加 `timestamp` 字段，确保每个事件 ID 全局唯一
+
+2. **修复 TurnBegin 多轮对话处理**
+   - **问题**: 多轮对话时，新的 TurnBegin 没有正确处理已有 root_span
+   - **修复**: 检测到已有 root_span 时，先结束当前 turn，自动递增 `turn_index`
+
+3. **修复工具调用 event_id 非确定性**
+   - **问题**: `hash(tool_call_id)` 在 Python 重启后值不同，导致去重失效
+   - **修复**: 使用 `hashlib.sha256(str(tool_call_id).encode()).hexdigest()` 生成确定性哈希
+
+4. **修复 LRU 缓存实现错误**
+   - **问题**: `list + set` 实现的是 FIFO 而非真正的 LRU
+   - **修复**: 使用 `OrderedDict` 实现真正的 LRU 缓存，`move_to_end()` + `popitem(last=False)`
+
+5. **修复 KeyboardInterrupt 被捕获**
+   - **问题**: `retry.py` 中 `except Exception` 兜底拦截了 `KeyboardInterrupt`
+   - **修复**: 移除 `Exception` 兜底，防止拦截 `Ctrl+C`
+
+6. **修复 Windows 完全不兼容**
+   - **问题**: `fcntl` 是 Unix 特有模块，Windows 导入失败
+   - **修复**: 添加平台检测，Windows 使用 socket 绑定作为锁机制
+
+#### 🔶 中优先级修复
+
+7. **修复数据库路径不一致**
+   - **修复**: `~/.kimi/monitor/` → `~/.agenttrace/`
+
+8. **修复日志文件名不一致**
+   - **修复**: `/tmp/kimi-cozeloop.log` → `/tmp/agent-trace.log`
+
+9. **修复项目名称残留**
+   - **修复**: "Kimi Monitor" → "AgentTrace"
+
+10. **修复条件表达式优先级**
+    - **修复**: `wire_parser.py` 添加括号 `(str(return_value) if return_value else '')`
+
+11. **修复延迟导入问题**
+    - **修复**: `hashlib`, `os` 移到文件顶部
+
+#### 🟢 低优先级修复
+
+12. **修复未使用的导入**
+    - **修复**: 移除 `monitor.py`, `config.py`, `wire_parser.py` 中的未使用导入
+
+13. **修复 tool_call_id 类型问题**
+    - **修复**: `str(tool_call_id)[:16]` 确保字符串类型
+
+14. **修复 step_n 不一致**
+    - **修复**: `_mark_processed` 使用正确的 `step_n` 变量
+
+15. **修复 PID 文件路径不一致**
+    - **修复**: `/tmp/agent-trace.pid` → `/tmp/agent_trace.pid`
+
+16. **修复 API Token 泄露风险**
+    - **问题**: API Token 被直接写入系统服务配置文件
+    - **修复**: 
+      - 使用独立的 `~/.agenttrace/.env` 文件存储敏感信息
+      - 设置文件权限 `0o600`（仅所有者可读写）
+      - 服务配置使用 `EnvironmentFile` 加载
+
+#### 代码质量改进
+
+17. **修复文件读取 tell() 问题**
+    - **修复**: 使用 `readline()` 替代 `for line in f` 循环
+
+18. **添加路径遍历防护**
+    - **修复**: `jsonl_reader.py` 添加 `_sanitize_path()` 方法
+
+19. **添加 incomplete_line 长度限制**
+    - **修复**: 限制最大 1MB，防止内存耗尽
+
+#### 安全改进
+
+20. **添加命令行敏感信息警告**
+    - 检测用户是否通过命令行参数传递敏感信息
+    - 警告信息会显示在 `ps aux` 和 shell history 中的风险
+
+21. **日志自动脱敏**
+    - Token 和 Workspace ID 在日志中自动脱敏显示
+    - 短字符串完全隐藏，长字符串显示前后各4字符
+
+#### 日志改进
+
+22. **添加日志轮转**
+    - 使用 `RotatingFileHandler`
+    - 单个文件最大 10MB，保留 5 个备份
+
+23. **添加详细日志前缀**
+    - `[WIRE]` - Wire 协议事件解析
+    - `[EVENT:xxx]` - 事件处理状态
+    - `[DEDUP]` - 去重检查
+    - 状态指示器：`root_span=✓`, `current_step=✗`
+
+### 🧪 新增测试文档
+
+- 新增 `docs/TESTING.md` 完整测试指南
+  - 手动测试流程（使用 kimi 命令）
+  - 单元测试、集成测试、端到端测试
+  - CI/CD 配置示例
+  - 测试最佳实践
+
+### 📦 修改文件统计
+
+共修改 **15+ 个文件**：
+- `src/agent_trace/core/dedup.py`
+- `src/agent_trace/core/session_state.py`
+- `src/agent_trace/core/persistent_offset.py`
+- `src/agent_trace/core/__init__.py`
+- `src/agent_trace/core/monitor.py`
+- `src/agent_trace/utils/config.py`
+- `src/agent_trace/utils/retry.py`
+- `src/agent_trace/utils/logging_config.py`
+- `src/agent_trace/utils/singleton.py`
+- `src/agent_trace/parsers/wire_parser.py`
+- `src/agent_trace/parsers/jsonl_reader.py`
+- `src/agent_trace/cli.py`
+- `src/agent_trace/autostart/__init__.py`
+- `src/agent_trace/autostart/*/ *.template`
+- `docs/TESTING.md` (新增)
+
+---
+
 ## [0.3.2] - 2026-03-18
 
 ### 🛡️ 重要修复 - 单实例运行

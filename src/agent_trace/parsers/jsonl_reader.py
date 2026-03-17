@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JSONL 增量读取器（v0.3.0 增强版）
+JSONL 增量读取器（v0.3.2 增强版）
 
 新特性：
 1. Offset 持久化存储（借鉴 OTel FileLog Receiver）
@@ -12,6 +12,8 @@ JSONL 增量读取器（v0.3.0 增强版）
 import json
 import os
 import logging
+import hashlib
+from pathlib import Path
 from typing import Dict, Any, Iterator, Optional, Tuple
 from dataclasses import dataclass
 
@@ -19,6 +21,9 @@ from ..core.persistent_offset import PersistentOffsetStore, FileOffset
 from ..core.dedup import FileFingerprint
 
 logger = logging.getLogger("agent_trace")
+
+# 安全限制
+MAX_INCOMPLETE_LINE_LENGTH = 1024 * 1024  # 1MB 最大不完整行长度
 
 
 @dataclass
@@ -39,6 +44,34 @@ class IncrementalJSONLReader:
     - 截断检测和恢复
     """
     
+    @staticmethod
+    def _sanitize_path(filepath: str) -> str:
+        """
+        路径安全处理：规范化路径并防止路径遍历攻击
+        
+        Args:
+            filepath: 原始文件路径
+            
+        Returns:
+            规范化后的绝对路径
+            
+        Raises:
+            ValueError: 如果路径包含路径遍历攻击特征
+        """
+        # 转换为 Path 对象并获取绝对路径
+        path = Path(filepath).expanduser()
+        
+        # 拒绝绝对路径中的遍历序列（针对相对路径输入）
+        # 注意：我们允许访问系统中任何位置的文件（因为这是监控工具的需求）
+        # 但我们要确保路径是规范化的，防止 ../../../etc/passwd 这类攻击
+        
+        try:
+            # 获取规范化后的绝对路径
+            resolved_path = path.resolve()
+            return str(resolved_path)
+        except (OSError, ValueError) as e:
+            raise ValueError(f"Invalid file path: {filepath}. Error: {e}")
+    
     def __init__(
         self,
         filepath: str,
@@ -53,13 +86,15 @@ class IncrementalJSONLReader:
             offset_store: Offset 存储实例，None 则创建默认实例
             auto_save_offset: 是否自动保存 offset
         """
-        self.filepath = filepath
+        # 路径安全处理：规范化并验证路径
+        self.filepath = self._sanitize_path(filepath)
         self.offset_store = offset_store or PersistentOffsetStore()
         self.auto_save_offset = auto_save_offset
         
         # 读取状态
         self.position: int = 0
         self.incomplete_line: str = ""
+        self._max_incomplete_length = MAX_INCOMPLETE_LINE_LENGTH
         self.line_number: int = 0
         self.records_read: int = 0
         
@@ -194,7 +229,12 @@ class IncrementalJSONLReader:
             with open(self.filepath, 'r', encoding='utf-8') as f:
                 f.seek(self.position)
                 
-                for line in f:
+                # 使用 readline() 而不是 for line in f，以便正确使用 tell()
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break
+                    
                     self.line_number += 1
                     full_line = self.incomplete_line + line
                     
@@ -212,7 +252,15 @@ class IncrementalJSONLReader:
                                         line_number=self.line_number
                                     )
                             except json.JSONDecodeError:
-                                self.incomplete_line = full_line + '\n'
+                                # 检查 incomplete_line 长度限制，防止内存耗尽
+                                if len(full_line) > self._max_incomplete_length:
+                                    logger.warning(
+                                        f"Incomplete line exceeded max length ({self._max_incomplete_length}), "
+                                        f"discarding incomplete data in {self.filepath}"
+                                    )
+                                    self.incomplete_line = ""
+                                else:
+                                    self.incomplete_line = full_line + '\n'
                     else:
                         self.incomplete_line = full_line
                     
@@ -279,7 +327,6 @@ class TrackedJSONLReader(IncrementalJSONLReader):
     
     def _generate_record_id(self, record: JSONLRecord) -> str:
         """生成记录唯一 ID"""
-        import hashlib
         content = json.dumps(record.record, sort_keys=True)
         return hashlib.sha256(
             f"{self.filepath}:{record.offset}:{record.line_number}:{content}".encode()

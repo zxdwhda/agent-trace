@@ -5,7 +5,7 @@
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+
 
 
 @dataclass
@@ -24,7 +24,7 @@ class Config:
     
     # 日志配置
     log_level: str = "INFO"
-    log_file: str = "/tmp/kimi-cozeloop.log"
+    log_file: str = "/tmp/agent-trace.log"
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -37,7 +37,7 @@ class Config:
             poll_interval=float(os.getenv("KIMI_POLL_INTERVAL", "2.0")),
             active_session_timeout_minutes=int(os.getenv("KIMI_ACTIVE_TIMEOUT", "30")),
             log_level=os.getenv("KIMI_LOG_LEVEL", "INFO"),
-            log_file=os.getenv("KIMI_LOG_FILE", "/tmp/kimi-cozeloop.log"),
+            log_file=os.getenv("KIMI_LOG_FILE", "/tmp/agent-trace.log"),
         )
     
     @classmethod

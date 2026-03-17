@@ -29,7 +29,7 @@ agent-trace [选项]
 | `--sessions-dir` | `-s` | 会话目录 | ~/.kimi/sessions/ |
 | `--poll-interval` | `-p` | 轮询间隔（秒） | 2.0 |
 | `--log-level` | `-l` | 日志级别 | INFO |
-| `--log-file` | | 日志文件 | /tmp/kimi-cozeloop.log |
+| `--log-file` | | 日志文件 | /tmp/agent-trace.log |
 | `--disable-dedup` | | 禁用去重 | false |
 | `--disable-offset` | | 禁用 offset 持久化 | false |
 | `--version` | `-v` | 显示版本 | |
@@ -420,7 +420,7 @@ config.setup_env()
 | `poll_interval` | `KIMI_POLL_INTERVAL` | 2.0 |
 | `active_session_timeout_minutes` | `KIMI_ACTIVE_TIMEOUT` | 30 |
 | `log_level` | `KIMI_LOG_LEVEL` | INFO |
-| `log_file` | `KIMI_LOG_FILE` | /tmp/kimi-cozeloop.log |
+| `log_file` | `KIMI_LOG_FILE` | /tmp/agent-trace.log |
 
 ---
 
@@ -547,5 +547,5 @@ monitor.handlers[WireEventType.CUSTOM] = CustomHandler()
 
 ---
 
-*文档版本: v0.3.0*  
+*文档版本: v0.3.3*  
 *最后更新: 2026-03-18*

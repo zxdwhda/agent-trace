@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Kimi Monitor 核心模块
-"""
+"""AgentTrace 核心模块"""
 
 from .monitor import AgentTraceMonitor
 from .session_state import SessionState

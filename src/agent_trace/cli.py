@@ -9,12 +9,62 @@ import os
 import sys
 import argparse
 import signal
+import tempfile
 from pathlib import Path
 
 from .core.monitor import AgentTraceMonitor
 from .utils.config import Config
 from .utils.logging_config import setup_logging
 from .utils.singleton import SingleInstanceLock, get_running_instance_info
+
+
+def mask_sensitive(value: str, visible: int = 4) -> str:
+    """脱敏敏感信息，显示前后各visible个字符，中间用***代替"""
+    if not value:
+        return "***"
+    if len(value) <= visible * 2:
+        return "*" * len(value)
+    return value[:visible] + "***" + value[-visible:]
+
+
+def _check_cli_security(args):
+    """
+    检查命令行参数安全风险
+    
+    警告用户如果通过命令行传递敏感信息（这些信息可能在 ps aux 中暴露）
+    """
+    import warnings
+    
+    # 检查是否通过命令行（而非环境变量）传递敏感信息
+    # 注意：argparse 的 default 会从环境变量读取，所以如果 args 值等于环境变量值，
+    # 说明用户可能通过环境变量设置的
+    workspace_from_env = os.getenv('COZELOOP_WORKSPACE_ID', '')
+    token_from_env = os.getenv('COZELOOP_API_TOKEN', '')
+    
+    cli_exposed = []
+    
+    if args.workspace_id and args.workspace_id != workspace_from_env:
+        cli_exposed.append('--workspace-id')
+    
+    if args.api_token and args.api_token != token_from_env:
+        cli_exposed.append('--api-token')
+    
+    if cli_exposed:
+        warnings.warn(
+            f"\n{'='*60}\n"
+            f"⚠️  安全警告：你正在通过命令行参数传递敏感信息：{', '.join(cli_exposed)}\n"
+            f"   这些信息可能会在以下位置暴露：\n"
+            f"   - 进程列表 (ps aux)\n"
+            f"   - Shell 历史记录 (history)\n"
+            f"   - 系统日志\n\n"
+            f"   建议改用环境变量配置：\n"
+            f"     export COZELOOP_WORKSPACE_ID=your-workspace-id\n"
+            f"     export COZELOOP_API_TOKEN=your-api-token\n"
+            f"     agent-trace\n"
+            f"{'='*60}\n",
+            UserWarning,
+            stacklevel=3
+        )
 
 
 def daemonize():
@@ -60,8 +110,8 @@ def daemonize():
     os.dup2(stdout.fileno(), sys.stdout.fileno())
     os.dup2(stderr.fileno(), sys.stderr.fileno())
     
-    # 写入 PID 文件
-    pid_file = Path("/tmp/agent-trace.pid")
+    # 写入 PID 文件（与 singleton.py 保持一致）
+    pid_file = Path(tempfile.gettempdir()) / "agent_trace.pid"
     pid_file.write_text(str(os.getpid()))
 
 
@@ -217,6 +267,9 @@ def main():
 
 def _run_monitor(args):
     """运行监控服务的内部函数"""
+    # 检查敏感信息是否通过命令行传递（安全风险警告）
+    _check_cli_security(args)
+    
     # 设置日志
     logger = setup_logging(args.log_level, args.log_file)
     
@@ -262,8 +315,8 @@ def _run_monitor(args):
         sys.exit(1)
     
     # 显示配置（脱敏）
-    logger.info(f"Workspace ID: {config.workspace_id[:8]}...")
-    logger.info(f"API Token: {config.api_token[:8]}...")
+    logger.info(f"Workspace ID: {mask_sensitive(config.workspace_id)}")
+    logger.info(f"API Token: {mask_sensitive(config.api_token)}")
     logger.info(f"API Base: {config.api_base}")
     
     # 处理 daemon 模式

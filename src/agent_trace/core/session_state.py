@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Session 状态管理（v0.3.1 增强版）
+Session 状态管理（v0.3.2 增强版）
 
 新增功能：
 1. 事件唯一 ID 生成（借鉴 LangSmith run_id）
@@ -82,18 +82,22 @@ class SessionState:
             "duplicate_blocked": 0
         }
     
-    def _generate_event_id(self, event_type: str, step_n: int = 0) -> str:
+    def _generate_event_id(self, event_type: str, step_n: int = 0, timestamp: float = 0) -> str:
         """
         生成事件唯一 ID
         
-        使用 session_id + turn_index + step_n + event_type 生成确定性 ID
+        使用 session_id + turn_index + step_n + event_type + timestamp 生成确定性 ID
         借鉴：LangSmith run_id 幂等性设计
+        添加 timestamp 确保同一 turn 内重复事件也能被区分
         """
+        # 使用 timestamp 来确保唯一性
+        ts_int = int(timestamp * 1000) if timestamp else int(time.time() * 1000)
         event_id = EventID(
             session_id=self.session_id,
             turn_index=self.turn_index,
             step_n=step_n,
-            event_type=event_type
+            event_type=event_type,
+            timestamp=ts_int  # 传入时间戳确保唯一性
         )
         return event_id.to_string()
     
@@ -151,12 +155,23 @@ class SessionState:
         Returns:
             Root span 实例（重复时返回 None）
         """
-        # 生成事件 ID
-        event_id = self._generate_event_id("turn_begin", 0)
+        # 如果已有 root_span，先结束它并开始新的一轮
+        if self.root_span:
+            logger.debug(f"[SESSION:{self.session_id[:8]}] 检测到已有 root_span，结束当前 turn 并递增 turn_index")
+            try:
+                self.end_turn(timestamp)
+            except Exception as e:
+                logger.warning(f"[SESSION:{self.session_id[:8]}] 结束前一个 turn 时出错: {e}")
+            # 递增 turn_index 以生成唯一的事件 ID
+            self.turn_index += 1
+        
+        # 生成事件 ID（使用 timestamp 确保唯一性）
+        event_id = self._generate_event_id("turn_begin", int(timestamp))
         
         # 检查重复
         if self._check_duplicate(event_id, "turn_begin"):
             self._event_counter["duplicate_blocked"] += 1
+            logger.debug(f"[SESSION:{self.session_id[:8]}] TurnBegin 被去重: {event_id[:16]}...")
             return None
         
         self._event_counter["turn_begin"] += 1
@@ -186,12 +201,12 @@ class SessionState:
             # 标记为已处理
             self._mark_processed(event_id, "turn_begin", 0)
             
-            logger.info(f"[SESSION:{self.session_id[:8]}] TurnBegin started (event_id={event_id[:16]}..., turn={self.turn_index})")
+            logger.info(f"[SESSION:{self.session_id[:8]}] ✓ TurnBegin started (event_id={event_id[:16]}..., turn={self.turn_index})")
             return self.root_span
             
         except Exception as e:
-            logger.error(f"[SESSION:{self.session_id[:8]}] Failed to start turn: {e}")
-            raise
+            logger.error(f"[SESSION:{self.session_id[:8]}] Failed to start turn: {e}", exc_info=True)
+            return None
     
     @retry_sdk_call(max_retries=2, initial_delay=0.5)
     def start_step(self, timestamp: float, step_n: int, model: str = "") -> Optional[Any]:
@@ -206,19 +221,19 @@ class SessionState:
         Returns:
             Model span 实例（重复时返回 None）
         """
-        # 生成事件 ID
-        event_id = self._generate_event_id("step_begin", step_n)
+        # 生成事件 ID（使用 timestamp 确保唯一性）
+        event_id = self._generate_event_id("step_begin", step_n, timestamp)
         
         # 检查重复
         if self._check_duplicate(event_id, "step_begin"):
             self._event_counter["duplicate_blocked"] += 1
-            logger.info(f"[SESSION:{self.session_id[:8]}] Step {step_n} blocked by dedup")
+            logger.debug(f"[SESSION:{self.session_id[:8]}] Step {step_n} blocked by dedup: {event_id[:16]}...")
             return None
         
         self._event_counter["step_begin"] += 1
         
         if not self.root_span:
-            logger.warning(f"[SESSION:{self.session_id[:8]}] No root span, cannot start step {step_n}")
+            logger.warning(f"[SESSION:{self.session_id[:8]}] No root span, cannot start step {step_n} (可能 TurnBegin 未处理或已结束)")
             return None
         
         # 结束之前的 step
@@ -279,8 +294,9 @@ class SessionState:
         tool_name = tool_call.get('name', 'unknown')
         tool_call_id = tool_call.get('id') or str(timestamp)
         
-        # 生成事件 ID（使用 tool_call_id 作为 step_n 确保唯一性）
-        event_id = self._generate_event_id(f"tool_call:{tool_name}", hash(tool_call_id) % 1000000)
+        # 生成事件 ID（使用 tool_call_id 的确定性哈希 + timestamp 确保唯一性）
+        step_n = int(hashlib.sha256(str(tool_call_id).encode()).hexdigest()[:8], 16) % 1000000
+        event_id = self._generate_event_id(f"tool_call:{tool_name}", step_n, timestamp)
         
         # 检查重复
         if self._check_duplicate(event_id, f"tool_call:{tool_name}"):
@@ -312,13 +328,13 @@ class SessionState:
             # 添加去重标签
             tool_span.set_tags({
                 "event_id": event_id[:16],
-                "tool_call_id": tool_call_id[:16] if len(tool_call_id) > 16 else tool_call_id,
+                "tool_call_id": str(tool_call_id)[:16],
             })
             
             self.active_tools[tool_call_id] = tool_span
             
             # 标记为已处理
-            self._mark_processed(event_id, "tool_call", 0, tool_call_id)
+            self._mark_processed(event_id, "tool_call", step_n, tool_call_id)
             
             logger.info(f"[SESSION:{self.session_id[:8]}] Tool {tool_name} started (event_id={event_id[:16]}...)")
             return tool_span
