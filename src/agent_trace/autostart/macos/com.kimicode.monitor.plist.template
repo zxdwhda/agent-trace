@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.kimicode.monitor</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{PYTHON_PATH}}</string>
+        <string>-m</string>
+        <string>kimi_monitor</string>
+        <string>--log-level</string>
+        <string>INFO</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>{{WORKING_DIR}}</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>COZELOOP_WORKSPACE_ID</key>
+        <string>{{COZELOOP_WORKSPACE_ID}}</string>
+        <key>COZELOOP_API_TOKEN</key>
+        <string>{{COZELOOP_API_TOKEN}}</string>
+        <key>COZELOOP_API_BASE</key>
+        <string>{{COZELOOP_API_BASE}}</string>
+        <key>KIMI_SESSIONS_DIR</key>
+        <string>{{KIMI_SESSIONS_DIR}}</string>
+        <key>KIMI_POLL_INTERVAL</key>
+        <string>{{KIMI_POLL_INTERVAL}}</string>
+        <key>KIMI_LOG_FILE</key>
+        <string>{{KIMI_LOG_FILE}}</string>
+        <key>PYTHONPATH</key>
+        <string>{{PYTHONPATH}}</string>
+    </dict>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    
+    <key>StandardOutPath</key>
+    <string>{{LOG_DIR}}/kimi-monitor.stdout.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>{{LOG_DIR}}/kimi-monitor.stderr.log</string>
+    
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>

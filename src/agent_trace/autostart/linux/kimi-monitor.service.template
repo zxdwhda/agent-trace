@@ -1,0 +1,52 @@
+[Unit]
+Description=Kimi Code CLI Monitor for Coze Compass
+Documentation=https://github.com/your-repo/kimi-monitor
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User={{USER}}
+Group={{GROUP}}
+WorkingDirectory={{WORKING_DIR}}
+
+# Environment variables
+Environment="COZELOOP_WORKSPACE_ID={{COZELOOP_WORKSPACE_ID}}"
+Environment="COZELOOP_API_TOKEN={{COZELOOP_API_TOKEN}}"
+Environment="COZELOOP_API_BASE={{COZELOOP_API_BASE}}"
+Environment="KIMI_SESSIONS_DIR={{KIMI_SESSIONS_DIR}}"
+Environment="KIMI_POLL_INTERVAL={{KIMI_POLL_INTERVAL}}"
+Environment="KIMI_LOG_FILE={{KIMI_LOG_FILE}}"
+Environment="PYTHONPATH={{PYTHONPATH}}"
+
+# Python executable and module
+ExecStart={{PYTHON_PATH}} -m kimi_monitor --log-level INFO
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Process management
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security
+NoNewPrivileges=false
+ProtectSystem=no
+ProtectHome=no
+
+# Logging
+StandardOutput=append:{{LOG_DIR}}/kimi-monitor.stdout.log
+StandardError=append:{{LOG_DIR}}/kimi-monitor.stderr.log
+SyslogIdentifier=kimi-monitor
+
+[Install]
+WantedBy=multi-user.target

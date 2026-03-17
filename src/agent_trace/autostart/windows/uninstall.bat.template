@@ -1,0 +1,47 @@
+@echo off
+chcp 65001 >nul
+title Kimi Monitor Uninstaller
+
+setlocal EnableDelayedExpansion
+
+echo ============================================
+echo Kimi Monitor Windows Uninstaller
+echo ============================================
+echo.
+
+:: Check admin privileges
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [ERROR] Please run as Administrator!
+    pause
+    exit /b 1
+)
+
+set "SERVICE_NAME=KimiMonitor"
+set "WORKING_DIR={{WORKING_DIR}}"
+set "WRAPPER_SCRIPT=%WORKING_DIR%\kimi_monitor_service.py"
+
+:: Stop service if running
+echo Stopping service...
+net stop %SERVICE_NAME% >nul 2>&1
+
+:: Remove service
+echo Removing service...
+sc delete %SERVICE_NAME%
+if %errorLevel% neq 0 (
+    echo [WARNING] Failed to remove service (may not exist)
+) else (
+    echo [OK] Service removed
+)
+
+:: Remove wrapper script
+if exist "%WRAPPER_SCRIPT%" (
+    del /f "%WRAPPER_SCRIPT%"
+    echo [OK] Removed wrapper script
+)
+
+echo.
+echo ============================================
+echo [OK] Uninstall completed!
+echo ============================================
+pause

@@ -1,0 +1,133 @@
+@echo off
+chcp 65001 >nul
+title Kimi Monitor Auto-Start Installer
+
+setlocal EnableDelayedExpansion
+
+echo ============================================
+echo Kimi Monitor Windows Auto-Start Installer
+echo ============================================
+echo.
+
+:: Check admin privileges
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [ERROR] Please run as Administrator!
+    pause
+    exit /b 1
+)
+
+:: Configuration
+set "SERVICE_NAME=KimiMonitor"
+set "DISPLAY_NAME=Kimi Code CLI Monitor"
+set "PYTHON_PATH={{PYTHON_PATH}}"
+set "WORKING_DIR={{WORKING_DIR}}"
+set "LOG_DIR={{LOG_DIR}}"
+
+:: Create log directory
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+
+:: Create wrapper script
+set "WRAPPER_SCRIPT=%WORKING_DIR%\kimi_monitor_service.py"
+(
+echo #!/usr/bin/env python3
+echo # Windows Service Wrapper for Kimi Monitor
+echo.
+echo import sys
+echo import os
+echo import logging
+echo import servicemanager
+echo import win32serviceutil
+echo import win32service
+echo import win32event
+echo.
+echo # Add project to path
+echo sys.path.insert(0, r"%WORKING_DIR%")
+echo.
+echo # Set environment variables
+echo os.environ["COZELOOP_WORKSPACE_ID"] = "{{COZELOOP_WORKSPACE_ID}}"
+echo os.environ["COZELOOP_API_TOKEN"] = "{{COZELOOP_API_TOKEN}}"
+echo os.environ["COZELOOP_API_BASE"] = "{{COZELOOP_API_BASE}}"
+echo os.environ["KIMI_SESSIONS_DIR"] = "{{KIMI_SESSIONS_DIR}}"
+echo os.environ["KIMI_POLL_INTERVAL"] = "{{KIMI_POLL_INTERVAL}}"
+echo os.environ["KIMI_LOG_FILE"] = "{{KIMI_LOG_FILE}}"
+echo.
+echo class KimiMonitorService(win32serviceutil.ServiceFramework):
+echo     _svc_name_ = "%SERVICE_NAME%"
+echo     _svc_display_name_ = "%DISPLAY_NAME%"
+echo     _svc_description_ = "Kimi Code CLI Session Monitor for Coze Compass"
+echo.
+echo     def __init__(self, args):
+echo         win32serviceutil.ServiceFramework.__init__(self, args)
+echo         self.stop_event = win32event.CreateEvent(None, 0, 0, None)
+echo         self.monitor = None
+echo.
+echo     def SvcStop(self):
+echo         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+echo         win32event.SetEvent(self.stop_event)
+echo         if self.monitor:
+echo             self.monitor.stop()
+echo.
+echo     def SvcDoRun(self):
+echo         servicemanager.LogMsg(
+echo             servicemanager.EVENTLOG_INFORMATION_TYPE,
+echo             servicemanager.PYS_SERVICE_STARTED,
+echo             (self._svc_name_, "")
+echo         )
+echo         self.main()
+echo.
+echo     def main(self):
+echo         from kimi_monitor.core.monitor import KimiSessionMonitor
+echo         from kimi_monitor.utils.config import Config
+echo.
+echo         config = Config()
+echo         self.monitor = KimiSessionMonitor(
+echo             sessions_dir=config.sessions_dir,
+echo             poll_interval=config.poll_interval,
+echo         )
+echo         self.monitor.start()
+echo.
+echo if __name__ == "__main__":
+echo     if len(sys.argv) == 1:
+echo         servicemanager.Initialize()
+echo         servicemanager.PrepareToHostSingle(KimiMonitorService)
+echo         servicemanager.StartServiceCtrlDispatcher()
+echo     else:
+echo         win32serviceutil.HandleCommandLine(KimiMonitorService)
+) > "%WRAPPER_SCRIPT%"
+
+echo [OK] Created service wrapper script
+echo.
+
+:: Install Python service dependencies
+echo Installing dependencies...
+"%PYTHON_PATH%" -m pip install pywin32 --quiet
+if %errorLevel% neq 0 (
+    echo [WARNING] Failed to install pywin32
+)
+
+:: Register service
+echo Registering service...
+"%PYTHON_PATH%" "%WRAPPER_SCRIPT%" --startup auto install
+if %errorLevel% neq 0 (
+    echo [ERROR] Failed to register service!
+    pause
+    exit /b 1
+)
+
+echo.
+echo ============================================
+echo [OK] Service installed successfully!
+echo.
+echo Service Name: %SERVICE_NAME%
+echo Display Name: %DISPLAY_NAME%
+echo.
+echo Commands:
+echo   net start %SERVICE_NAME%    - Start service
+echo   net stop %SERVICE_NAME%     - Stop service
+echo   sc delete %SERVICE_NAME%    - Uninstall service
+echo.
+echo Starting service...
+net start %SERVICE_NAME%
+echo.
+pause
