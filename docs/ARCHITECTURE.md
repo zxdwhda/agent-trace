@@ -214,6 +214,8 @@ agent_turn (root_span, span_type="agent")
 | ToolResultHandler | ToolResult | 结束 Tool Span |
 | ContentPartHandler | ContentPart | 累积输出内容 |
 | StatusUpdateHandler | StatusUpdate | 更新 Token 使用 |
+| ApprovalRequestHandler | ApprovalRequest | 处理审批请求 |
+| ApprovalResponseHandler | ApprovalResponse | 处理审批响应 |
 | TurnEndHandler | TurnEnd | 结束所有 Span |
 
 ### 6. IncrementalJSONLReader
@@ -291,7 +293,7 @@ agent_turn (root_span, span_type="agent")
 
 | 技术 | 用途 | 选型理由 |
 |------|------|----------|
-| **Python 3.8+** | 开发语言 | 生态丰富，异步支持好 |
+| **Python 3.9+** | 开发语言 | 生态丰富，异步支持好 |
 | **CozeLoop SDK** | 上报客户端 | 官方 SDK，稳定可靠 |
 | **SQLite** | 本地存储 | 零配置，WAL 模式性能好 |
 | **watchdog** | 文件监控 | 跨平台，事件驱动 |
@@ -424,5 +426,5 @@ monitor.update_config(new_config)
 
 ---
 
-*文档版本: v0.3.2*  
+*文档版本: v0.3.3*  
 *最后更新: 2026-03-18*

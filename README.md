@@ -167,13 +167,19 @@ agent-trace autostart uninstall
 
 ```bash
 # 启动监控
-./scripts/start.sh
+./scripts/start.sh start
 
 # 查看日志
-./scripts/logs.sh
+./scripts/start.sh logs
 
 # 停止监控
-./scripts/stop.sh
+./scripts/start.sh stop
+
+# 查看状态
+./scripts/start.sh status
+
+# 重启
+./scripts/start.sh restart
 ```
 
 ---
@@ -212,14 +218,11 @@ agent_turn (root_span)
 
 ### 事件去重机制
 
-采用三层去重策略（参考了 LangSmith 和 OpenTelemetry 的设计）：
+采用两层去重策略（参考了 LangSmith 和 OpenTelemetry 的设计）：
 
 ```
-L0: Session Memory Cache (Set)
-    └── 当前会话内已处理的 Span ID
-    
-L1: Global Memory Cache (LRU, 10,000 items)
-    └── 最近处理的事件 ID
+L1: Memory Cache (LRU, 10,000 items)
+    └── 内存级快速去重，避免频繁查询数据库
     
 L2: SQLite Persistent Store (WAL mode)
     └── 长期存储，进程重启后恢复
@@ -288,17 +291,14 @@ agent-trace/
 ## 🗓️ 版本规划
 
 ### v0.3.3 (当前版本)
+- ✅ Kimi Code CLI 完整支持
+- ✅ 事件去重机制（L1 内存缓存 + L2 SQLite）
+- ✅ Offset 持久化
+- ✅ 开机自启动
 - ✅ 修复事件 ID 生成问题
 - ✅ 修复 TurnBegin 多轮对话处理
 - ✅ 添加命令行安全警告
 - ✅ 添加日志轮转（RotatingFileHandler）
-- ✅ 完善测试文档
-
-### v0.3.2
-- ✅ Kimi Code CLI 完整支持
-- ✅ 事件去重机制
-- ✅ Offset 持久化
-- ✅ 开机自启动
 
 ### v0.4.0 (开发中) - Claude Code 支持
 - 🚧 Claude Code stream-json 解析器

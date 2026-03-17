@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AgentTrace 监控服务（v0.3.2）
+AgentTrace 监控服务（v0.3.3）
 
 新特性：
 1. 事件去重机制（借鉴 LangSmith run_id 幂等性）
@@ -99,7 +99,7 @@ class AgentTraceMonitor:
     def start(self):
         """启动监控服务"""
         logger.info("=" * 60)
-        logger.info("AgentTrace Monitor v0.3.2 Starting...")
+        logger.info("AgentTrace Monitor v0.3.3 Starting...")
         logger.info(f"Sessions dir: {self.sessions_dir}")
         logger.info(f"Poll interval: {self.poll_interval}s")
         logger.info(f"Deduplication: {'enabled' if self.enable_deduplication else 'disabled'}")
