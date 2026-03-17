@@ -216,7 +216,8 @@ class AgentTraceMonitor:
                                 f"[SCAN] Found active session: {session_dir.name[:16]}... "
                                 f"({age_minutes:.1f}min ago)"
                             )
-                            self._register_file(str(wire_file), skip_to_end=True)
+                            # 修改：从头开始读取，依赖去重机制避免重复上报
+                            self._register_file(str(wire_file), skip_to_end=False)
                             count += 1
                     except Exception as e:
                         logger.error(f"[SCAN] Error checking session {session_dir}: {e}")
