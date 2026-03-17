@@ -21,6 +21,72 @@
 
 ---
 
+### v0.3.3 (进行中) - SDK 规范优化
+**主题：对齐官方最佳实践**
+
+基于官方 CozeLoop Python SDK 深度分析，优化 SDK 调用方式，提升数据格式规范性。
+
+#### Phase 1: 代码规范优化 (P0)
+
+- [x] **SDK 使用方式分析**
+  - [x] 完成官方 SDK 深度调研
+  - [x] 识别当前代码与官方规范的差异
+  - [x] 制定优化方案
+
+- [ ] **ModelInput/ModelOutput 结构改造** ⭐
+  - [ ] 修改 `session_state.py`，model span 使用 `ModelInput`/`ModelOutput` 标准结构
+  - [ ] 支持多模态输入格式（文本、图片、文件）
+  - [ ] 使用 `ModelMessage` 构建标准化消息格式
+  - [ ] 工作量: 2-3 小时
+
+- [ ] **Client 实例管理优化**
+  - [ ] 显式调用 `cozeloop.set_default_client(client)`
+  - [ ] 或改为传递 client 引用到 SessionState
+  - [ ] 工作量: 1-2 小时
+
+#### Phase 2: 功能增强 (P1)
+
+- [ ] **添加 @observe 装饰器支持**
+  - [ ] 新增 `src/agent_trace/decorators.py`
+  - [ ] 为工具函数提供简化追踪方式
+  - [ ] 工作量: 3-4 小时
+
+- [ ] **Prompt 功能集成**
+  - [ ] 集成 CozeLoop 的 Prompt 管理能力
+  - [ ] 支持 Prompt 获取与格式化
+  - [ ] 工作量: 4-6 小时
+
+#### Phase 3: 高级特性 (P2)
+
+- [ ] **超大文本上报支持**
+  - [ ] 开启 `ultra_large_report` 配置
+  - [ ] 支持大文本内容上报
+  - [ ] 工作量: 1 小时
+
+- [ ] **跨服务 Trace 传递**
+  - [ ] 支持通过 HTTP Header 传递 SpanContext
+  - [ ] 实现 `to_header()` 和 `get_span_from_header()`
+  - [ ] 工作量: 3-4 小时
+
+#### SDK 优化详情
+
+| 优化项 | 当前实现 | 官方推荐 | 优先级 | 状态 |
+|--------|----------|----------|--------|------|
+| Model Span 输入格式 | 字符串 | `ModelInput` 结构 | P0 | ⏳ |
+| Client 管理 | 隐式全局 | 显式 `set_default_client` | P0 | ⏳ |
+| Span 类型 | 自定义 `"agent"` | 参考官方类型定义 | P1 | ⏳ |
+| 函数追踪 | 手动管理 | `@observe` 装饰器 | P1 | ⏳ |
+| Prompt 管理 | 未使用 | `get_prompt()` 集成 | P2 | ⏳ |
+| 超大文本 | 默认配置 | `ultra_large_report=True` | P2 | ⏳ |
+
+#### 技术债务
+
+- [ ] 完善类型注解（替换 `Any` 为具体类型）
+- [ ] 补充单元测试覆盖
+- [ ] 优化错误处理与重试机制
+
+---
+
 ### v0.4.0 (开发中) - Claude Code 支持
 **主题：双雄并立**
 
@@ -193,4 +259,4 @@ Cursor ───────?──▶│                 │
 ---
 
 *最后更新: 2026-03-18*
-*规划版本: v0.4.0 - v1.0.0*
+*规划版本: v0.3.3 - v1.0.0*
