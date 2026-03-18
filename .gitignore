@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Local configuration (contains sensitive data)
+.env
+.env.local
+*.local.conf
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Test files
+test_output/
+test_results/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AgentTrace specific
+/tmp/agent-trace.pid
+/tmp/agent-trace.log
+~/.agenttrace/*.db
+~/.agenttrace/*.db-*
+
+# Documentation build
+docs/_build/
+site/
+
+# Temporary files
+*.tmp
+*.bak
+*.backup

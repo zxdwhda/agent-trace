@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AgentTrace 监控服务（v0.3.4 优化版）
+AgentTrace 监控服务（v0.3.5 - Root Span 修复版）
 
 新特性：
 1. Gateway Span 支持（服务级别可观测性）
@@ -21,7 +21,7 @@ import logging
 import cozeloop
 
 # 版本号
-AGENT_TRACE_VERSION = "0.3.4"
+AGENT_TRACE_VERSION = "0.3.5"
 
 from ..parsers.jsonl_reader import IncrementalJSONLReader, JSONLRecord
 from ..parsers.wire_parser import WireEvent, WireEventType
@@ -111,7 +111,10 @@ class AgentTraceMonitor:
         
         # === P1: 创建 Gateway Span ===
         try:
-            self._gateway_span = cozeloop.start_span(
+            # 使用 client 实例调用以支持更多参数
+            from cozeloop._client import get_default_client
+            client = get_default_client()
+            self._gateway_span = client.start_span(
                 name="agenttrace_gateway", 
                 span_type="gateway"
             )

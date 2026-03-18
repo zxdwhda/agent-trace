@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Session 状态管理（v0.3.4 优化版）
+Session 状态管理（v0.3.5 - Root Span 修复版）
 
 优化内容：
 1. 补充 Span 类型常量（entry/message/prompt/rag/session/gateway）
@@ -16,6 +16,7 @@ import hashlib
 import os
 import time
 import logging
+import threading
 from typing import Optional, Dict, Any, List
 
 import cozeloop
@@ -260,9 +261,14 @@ class SessionState:
             self.trace_context.turn_state.user_input = user_input
             
             # P0: 创建 Entry Span 作为真正的根节点
-            self.entry_span = cozeloop.start_span(
+            # 关键：使用 start_new_trace=True 确保这是一个 Root Span（parent_span_id="0"）
+            # 注意：必须使用 client 实例调用，全局 cozeloop.start_span() 不支持 start_new_trace 参数
+            from cozeloop._client import get_default_client
+            client = get_default_client()
+            self.entry_span = client.start_span(
                 "session_entry",
-                self.SPAN_TYPE_ENTRY
+                self.SPAN_TYPE_ENTRY,
+                start_new_trace=True,
             )
             self.entry_span.set_tags({
                 "session_id": self.session_id,
@@ -272,7 +278,7 @@ class SessionState:
             self.entry_span.set_input(user_input)
             
             # P0: Agent Span 作为 Entry 的子节点
-            self.root_span = cozeloop.start_span(
+            self.root_span = client.start_span(
                 "agent_turn",
                 self.SPAN_TYPE_AGENT,
                 child_of=self.entry_span,
@@ -351,8 +357,12 @@ class SessionState:
         self._think_content = ""
         
         try:
+            # 获取 client 实例
+            from cozeloop._client import get_default_client
+            client = get_default_client()
+            
             # P0: 创建 Prompt Span（在 Model Span 之前记录提示词）
-            prompt_span = cozeloop.start_span(
+            prompt_span = client.start_span(
                 f"prompt_{step_n}",
                 self.SPAN_TYPE_PROMPT,
                 child_of=self.root_span,
@@ -368,7 +378,7 @@ class SessionState:
             prompt_span.finish()
             
             # 创建 Model Span，指定 child_of 建立层级关系
-            self.current_step = cozeloop.start_span(
+            self.current_step = client.start_span(
                 f"step_{step_n}",
                 self.SPAN_TYPE_MODEL,
                 child_of=self.root_span,
@@ -439,7 +449,9 @@ class SessionState:
         
         try:
             # 创建 Tool Span，指定 child_of 建立层级关系
-            tool_span = cozeloop.start_span(
+            from cozeloop._client import get_default_client
+            client = get_default_client()
+            tool_span = client.start_span(
                 f"tool:{tool_name}",
                 self.SPAN_TYPE_TOOL,
                 child_of=self.current_step,
@@ -645,7 +657,13 @@ class SessionState:
     
     def end_turn(self, timestamp: float):
         """
-        结束 Turn
+        结束 Turn（模仿 OpenClaw 延迟结束机制）
+        
+        OpenClaw 实现参考：
+        1. 先结束 Agent Span（root_span）
+        2. 延迟 100ms 后结束 Entry Span（真正的 Root）
+        3. 延迟期间确保所有子 Span 先上报
+        4. 强制 flush 队列确保数据立即发送
         
         Args:
             timestamp: 时间戳
@@ -662,10 +680,17 @@ class SessionState:
             tool_span.finish()
         self.active_tools.clear()
         
-        # 结束 root span
-        if self.root_span:
+        # 保存需要在延迟中使用的数据
+        root_span_ref = self.root_span
+        entry_span_ref = self.entry_span
+        trace_context_ref = self.trace_context
+        session_id = self.session_id
+        event_counter = self._event_counter.copy()
+        
+        # 立即结束 Agent Span（child span）
+        if root_span_ref:
             # 包含 gen_ai.* 标准属性的最终统计
-            self.root_span.set_output({
+            root_span_ref.set_output({
                 "total_tokens": self.total_tokens,
                 "input_tokens": self.total_input_tokens,
                 "output_tokens": self.total_output_tokens,
@@ -674,19 +699,47 @@ class SessionState:
                 "context_usage": f"{self.context_usage:.2%}",
                 "gen_ai.usage.total_tokens": self.total_tokens,
             })
-            self.root_span.finish()
-            self.root_span = None
+            root_span_ref.finish()
+            logger.info(f"[SESSION:{session_id[:8]}] Agent span finished (will delay entry span)")
         
-        # 结束 entry span
-        if self.entry_span:
-            self.entry_span.finish()
-            self.entry_span = None
+        # 清除引用（避免重复结束）
+        self.root_span = None
+        self.active_tools.clear()
         
-        # 结束 TraceContext
-        if self.trace_context:
-            self._context_manager.end_turn(self.trace_context.run_id)
-            self.trace_context = None
+        # 延迟 100ms 后结束 Entry Span（Root Span）并 flush
+        # 模仿 OpenClaw: index.js:553-573
+        def delayed_finish_root():
+            try:
+                # 结束 Entry Span（真正的 Root）
+                if entry_span_ref:
+                    entry_span_ref.finish()
+                    logger.info(f"[SESSION:{session_id[:8]}] Entry span (Root) finished (delayed)")
+                
+                # 强制刷新队列（关键！）
+                try:
+                    import cozeloop
+                    cozeloop.flush()
+                    logger.info(f"[SESSION:{session_id[:8]}] CozeLoop queue flushed")
+                except Exception as e:
+                    logger.warning(f"[SESSION:{session_id[:8]}] Failed to flush cozeloop: {e}")
+                
+                # 结束 TraceContext
+                if trace_context_ref:
+                    self._context_manager.end_turn(trace_context_ref.run_id)
+                    logger.info(f"[SESSION:{session_id[:8]}] TraceContext ended (delayed)")
+                
+                logger.info(f"[SESSION:{session_id[:8]}] Turn ended and session cache cleared (delayed)")
+                
+            except Exception as e:
+                logger.error(f"[SESSION:{session_id[:8]}] Error in delayed finish: {e}", exc_info=True)
         
-        # 清理当前会话缓存
+        # 启动延迟定时器（500ms，确保所有子 Span 先上报完成）
+        # 注意：OpenClaw 使用 100ms，但我们增加到 500ms 以确保可靠性
+        timer = threading.Timer(0.5, delayed_finish_root)
+        timer.daemon = True  # 设置为守护线程，避免阻塞程序退出
+        timer.start()
+        
+        # 立即清理当前会话缓存（非关键数据）
         self._processed_spans.clear()
-        logger.info(f"[SESSION:{self.session_id[:8]}] Turn ended and session cache cleared")
+        self.entry_span = None
+        self.trace_context = None

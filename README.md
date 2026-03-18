@@ -12,7 +12,7 @@
 
 ## 📋 功能特性
 
-### ✅ 当前版本 v0.3.4
+### ✅ 当前版本 v0.3.5
 
 | 特性 | 状态 | 说明 |
 |-----|------|------|
@@ -22,18 +22,18 @@
 | 文件指纹检测 | ✅ | 防止 inode 复用问题 |
 | 开机自启动 | ✅ | macOS/Linux/Windows 全支持 |
 | Trace 层级结构 | ✅ | agent → model → tool 正确嵌套 |
-| **TraceContext 管理** | ✅ **v0.3.4 新增** | trace_id/run_id/turn_id 完整追踪 |
-| **Span 类型体系** | ✅ **v0.3.4 新增** | entry/prompt/gateway 等 9 种类型 |
-| **gen_ai.* 标准** | ✅ **v0.3.4 新增** | OpenTelemetry 兼容的 Token 追踪 |
-| **Runtime 信息** | ✅ **v0.3.4 新增** | 动态 Agent 类型检测 |
-| **Gateway Span** | ✅ **v0.3.4 新增** | 服务级别可观测性 |
+| **TraceContext 管理** | ✅ v0.3.4 新增 | trace_id/run_id/turn_id 完整追踪 |
+| **Span 类型体系** | ✅ v0.3.4 新增 | entry/prompt/gateway 等 9 种类型 |
+| **gen_ai.* 标准** | ✅ v0.3.4 新增 | OpenTelemetry 兼容的 Token 追踪 |
+| **Runtime 信息** | ✅ v0.3.4 新增 | 动态 Agent 类型检测 |
+| **Gateway Span** | ✅ v0.3.4 新增 | 服务级别可观测性 |
 | Claude Code 监控 | 🚧 | v0.5.0 开发中 |
 
 ### 🔄 与 OpenClaw 官方实现对齐
 
-AgentTrace v0.3.4 参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://www.coze.cn/docs/developer_guides/openclaw_cozeloop_trace) 进行了深度重构，实现与官方 OpenClaw 同等级别的 Trace 上报能力：
+AgentTrace v0.3.5 参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://www.coze.cn/docs/developer_guides/openclaw_cozeloop_trace) 进行了深度重构，实现与官方 OpenClaw 同等级别的 Trace 上报能力：
 
-| 功能 | OpenClaw 官方插件 | AgentTrace (v0.3.4) |
+| 功能 | OpenClaw 官方插件 | AgentTrace (v0.3.5) |
 |------|------------------|---------------------|
 | **Trace 层级结构** | `openclaw_request` → `agent` → `model` → `tool` | ✅ `entry` → `agent` → `model` → `tool` |
 | **Span 类型** | entry, prompt, model, tool, gateway... | ✅ 9 种类型完整对齐 |
@@ -221,7 +221,7 @@ agent-trace autostart uninstall
 
 ## 📊 Trace 数据结构
 
-### Span 层级关系（v0.3.4 更新）
+### Span 层级关系（v0.3.5 更新）
 
 ```
 session_entry (entry_span) - 请求入口
@@ -232,7 +232,7 @@ session_entry (entry_span) - 请求入口
 └── agent_turn (agent_span) [Runtime]
     ├── tags:
     │   ├── agent_type: "kimi_cli" (动态检测)
-    │   ├── agent_version: "0.3.4"
+    │   ├── agent_version: "0.3.5"
     │   ├── run_id: "session_0_1773818952338"
     │   └── turn_index: "0"
     ├── prompt_1 (prompt_span)
@@ -345,7 +345,12 @@ agent-trace/
 
 ## 🗓️ 版本规划
 
-### v0.3.4 (当前版本) - OpenClaw 生态对齐
+### v0.3.5 (当前版本) - Root Span 修复
+- ✅ Root Span 正确上报（使用 client.start_span + start_new_trace）
+- ✅ 延迟结束机制优化（100ms → 500ms）
+- ✅ SDK 调用方式统一（client 实例替代全局函数）
+
+### v0.3.4 - OpenClaw 生态对齐
 - ✅ TraceContext 管理机制（trace_id/run_id/turn_id）
 - ✅ Span 类型体系完善（entry/prompt/gateway 等 9 种）
 - ✅ Token 追踪增强（gen_ai.* 标准属性）
@@ -462,4 +467,4 @@ git push origin feature/your-feature
 ---
 
 *最后更新: 2026-03-18*
-*当前版本: v0.3.4*
+*当前版本: v0.3.5*

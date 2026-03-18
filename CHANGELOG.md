@@ -7,6 +7,48 @@
 
 ---
 
+## [0.3.5] - 2026-03-18
+
+### 🐛 关键修复 - Root Span 问题
+
+**问题描述**: 
+- 上报内容只有 All Span、Model Span，没有 Root Span
+- All Span 运行轨迹混乱，层级关系不正确
+
+**根本原因**:
+- SDK 全局函数 `cozeloop.start_span()` 不支持 `start_new_trace` 参数
+- Entry Span 创建时未正确设置 `parent_span_id="0"`，导致不被识别为 Root Span
+- 延迟时间 100ms 可能不足以确保所有子 Span 先上报
+
+**修复内容**:
+1. **使用 Client 实例调用**: 所有 `cozeloop.start_span()` 改为 `client.start_span()`，以支持 `start_new_trace` 参数
+2. **强制开启新 Trace**: Entry Span 创建时添加 `start_new_trace=True`，确保 `parent_span_id="0"`
+3. **增加延迟时间**: 延迟结束时间从 100ms 增加到 500ms，确保所有子 Span 先上报完成
+
+**技术细节**:
+```python
+# 修复前 - 不支持 start_new_trace
+cozeloop.start_span("session_entry", "entry")
+
+# 修复后 - 使用 client 实例
+from cozeloop._client import get_default_client
+client = get_default_client()
+client.start_span("session_entry", "entry", start_new_trace=True)
+```
+
+**验证结果**:
+- ✅ Root Span 正确创建：日志显示 `Entry span (Root) finished (delayed)`
+- ✅ 层级结构正确：`session_entry` → `agent_turn` → `step_N` → `tool:N`
+- ✅ 队列刷新正常：`CozeLoop queue flushed`
+- ✅ TraceContext 管理正确：`TraceContext ended (delayed)`
+
+**修改文件**:
+- `src/agent_trace/core/session_state.py` - 所有 start_span 调用改为 client 实例方式
+- `src/agent_trace/core/monitor.py` - Gateway Span 同样改为 client 实例方式
+- `~/.agenttrace/start.sh` - 补充 `KIMI_SESSIONS_DIR` 环境变量
+
+---
+
 ## [0.3.4] - 2026-03-18
 
 ### 🎯 核心优化 - 对标 OpenClaw 官方实现
