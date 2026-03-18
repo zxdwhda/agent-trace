@@ -256,7 +256,7 @@ session_entry (entry_span) - 请求入口
             └── set_output(): {"result": "..."}
 ```
 
-**v0.3.4 新增特性**:
+**v0.3.5 新增特性**:
 - **Entry Span**: 作为请求入口的根节点
 - **Prompt Span**: 在每个 Step 前记录用户输入
 - **Trace 标签**: `trace_id` 和 `run_id` 支持跨系统关联

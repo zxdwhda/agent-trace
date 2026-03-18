@@ -457,5 +457,5 @@ find ~/.kimi/sessions -name "wire.jsonl" -mtime -1 | head -5
 
 ---
 
-*文档版本: v0.3.3*  
+*文档版本: v0.3.5*  
 *最后更新: 2026-03-18*

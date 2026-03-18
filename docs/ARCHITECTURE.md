@@ -426,5 +426,5 @@ monitor.update_config(new_config)
 
 ---
 
-*文档版本: v0.3.3*  
+*文档版本: v0.3.5*  
 *最后更新: 2026-03-18*

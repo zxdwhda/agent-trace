@@ -8,20 +8,42 @@
 
 ## 📅 版本规划
 
-### v0.3.2 (2026-03-18) - 当前版本
-**主题：现代化重构**
+### v0.3.5 (2026-03-18) - 当前版本
+**主题：Root Span 修复**
 
 #### 已完成
-- [x] 重构为现代 Python 开源项目结构（src/ layout）
-- [x] 使用 pyproject.toml 替代 setup.py
-- [x] 添加 Hatch 构建系统
-- [x] 添加 CI/CD 工作流（GitHub Actions）
-- [x] 完善文档（README, REFERENCES, ROADMAP）
-- [x] 添加代码质量工具（black, ruff, mypy）
+- [x] 修复 Root Span 未正确上报的问题
+- [x] 使用 client.start_span() + start_new_trace=True 确保 parent_span_id="0"
+- [x] 延迟结束时间从 100ms 增加到 500ms
+- [x] SDK 调用方式统一（client 实例替代全局函数）
 
 ---
 
-### v0.3.3 (进行中) - SDK 规范优化
+### v0.3.4 (2026-03-18) - OpenClaw 生态对齐
+**主题：对标官方实现**
+
+#### 已完成
+- [x] TraceContext 管理机制（trace_id/run_id/turn_id）
+- [x] Span 类型体系完善（entry/prompt/gateway 等 9 种）
+- [x] Token 追踪增强（gen_ai.* 标准属性）
+- [x] Runtime 信息设置（动态 Agent 类型检测）
+- [x] Gateway Span 服务级别追踪
+- [x] Entry → Agent → Prompt → Model → Tool 层级结构
+
+---
+
+### v0.3.3 (2026-03-18) - SDK 规范优化
+**主题：对齐官方最佳实践**
+
+#### 已完成
+- [x] SDK 使用方式分析
+- [x] 完成官方 SDK 深度调研
+- [x] 识别当前代码与官方规范的差异
+- [x] 制定优化方案
+
+---
+
+### v0.3.6 (规划中) - SDK 深度优化
 **主题：对齐官方最佳实践**
 
 基于官方 CozeLoop Python SDK 深度分析，优化 SDK 调用方式，提升数据格式规范性。
@@ -259,4 +281,4 @@ Cursor ───────?──▶│                 │
 ---
 
 *最后更新: 2026-03-18*
-*规划版本: v0.3.3 - v1.0.0*
+*规划版本: v0.3.6 - v1.0.0*

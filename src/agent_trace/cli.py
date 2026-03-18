@@ -221,7 +221,7 @@ def get_version():
         from ._version import __version__
         return __version__
     except ImportError:
-        return "0.3.3"
+        return "0.3.5"
 
 
 def main():

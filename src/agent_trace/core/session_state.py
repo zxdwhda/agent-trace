@@ -31,7 +31,7 @@ logger = logging.getLogger("agent_trace")
 
 
 class SessionState:
-    """管理单个 Session 的 Trace 状态（v0.3.4 优化版）"""
+    """管理单个 Session 的 Trace 状态（v0.3.5 - Root Span 修复版）""
     
     # ========== Span 类型常量（完整版）==========
     # 原有类型
@@ -89,7 +89,7 @@ class SessionState:
         
         # P0: 动态 Agent 类型检测
         self.agent_type = self._detect_agent_type()
-        self.agent_version = "0.3.4"
+        self.agent_version = "0.3.5"
         
         # 内容累积
         self.last_user_message = ""

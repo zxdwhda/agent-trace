@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-JSONL 增量读取器（v0.3.2 增强版）
+JSONL 增量读取器（v0.3.5 增强版）
 
 新特性：
 1. Offset 持久化存储（借鉴 OTel FileLog Receiver）

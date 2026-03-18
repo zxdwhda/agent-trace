@@ -1,10 +1,10 @@
 #!/bin/bash
-# AgentTrace v0.3.2 测试启动脚本
+# AgentTrace v0.3.5 测试启动脚本
 
 set -e
 
 echo "=========================================="
-echo "AgentTrace v0.3.2 测试启动"
+echo "AgentTrace v0.3.5 测试启动"
 echo "=========================================="
 
 # 设置环境变量（请修改为你自己的值）
@@ -40,7 +40,7 @@ echo "✅ 数据库已重置"
 
 # 启动新版本
 echo ""
-echo "=== 启动 AgentTrace v0.3.2 ==="
+echo "=== 启动 AgentTrace v0.3.5 ===="
 cd "$(dirname "$0")"
 export PYTHONPATH="$(pwd)/src:$PYTHONPATH"
 
