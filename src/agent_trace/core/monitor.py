@@ -258,8 +258,8 @@ class AgentTraceMonitor:
                         
                         if age_seconds < 60:
                             logger.info(f"[SCAN] Found new session: {session_dir.name[:16]}... ({age_seconds:.0f}s ago)")
-                            # 新会话从文件末尾开始，不读取历史数据
-                            self._register_file(str(wire_file), start_from_end=True)
+                            # 新会话从头读取，依赖去重机制避免重复
+                            self._register_file(str(wire_file), start_from_end=False)
                             count += 1
                     except Exception as e:
                         logger.error(f"[SCAN] Error registering new session {session_dir}: {e}")
