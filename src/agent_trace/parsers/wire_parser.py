@@ -112,8 +112,19 @@ class WireParser:
     
     @staticmethod
     def parse_tool_call(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """解析工具调用"""
-        tool_call = payload.get('tool_call', {})
+        """解析工具调用
+        
+        支持两种格式:
+        1. 直接格式: {"type": "function", "id": "...", "function": {...}}
+        2. 嵌套格式: {"tool_call": {"type": "function", "id": "...", "function": {...}}}
+        """
+        # 检查是否是嵌套格式
+        if 'tool_call' in payload:
+            tool_call = payload.get('tool_call', {})
+        else:
+            # 直接格式
+            tool_call = payload
+        
         function = tool_call.get('function', {})
         
         return {
@@ -128,11 +139,19 @@ class WireParser:
         """解析工具结果
         
         支持多种可能的返回格式：
+        - 直接格式: {"tool_call_id": "...", "return_value": {...}}
+        - 嵌套格式: {"tool_result": {"tool_call_id": "...", "return_value": {...}}}
         - return_value.output / content / result / data
         - return_value.is_error / error / success
         - return_value.message / error_message
         """
-        tool_result = payload.get('tool_result', {})
+        # 检查是否是嵌套格式
+        if 'tool_result' in payload:
+            tool_result = payload.get('tool_result', {})
+        else:
+            # 直接格式
+            tool_result = payload
+        
         return_value = tool_result.get('return_value', {})
         
         # 尝试多种可能的字段名获取内容

@@ -7,6 +7,182 @@
 
 ---
 
+## [0.3.4] - 2026-03-18
+
+### 🎯 核心优化 - 对标 OpenClaw 官方实现
+
+参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://www.coze.cn/docs/developer_guides/openclaw_cozeloop_trace) 架构，对核心追踪逻辑进行深度重构，实现与官方 OpenClaw 同等级别的 Trace 上报能力。
+
+**设计对齐**:
+- 遵循 OpenClaw 的 Span 层级结构: `entry` → `agent` → `model` → `tool`
+- 支持 OpenTelemetry 标准属性 (`gen_ai.*`)
+- 实现类似的 TraceContext 管理机制 (`trace_id`, `run_id`, `turn_id`)
+- 提供 Runtime 信息自动检测
+- 新增 Gateway Span 服务级监控
+
+**应用价值**:
+- 利用 CozeLoop 分析与可视化能力，深入洞察 Kimi CLI 的使用成本、性能与行为
+- 支持 Token 消耗统计、模型性能分析、工具调用链路追踪
+- 逐步上报机制：已完成的节点先上报，实时跟进请求执行情况
+
+#### 1. TraceContext 管理机制（新增）
+
+借鉴 OpenClaw 的上下文管理设计，新增完整的 TraceContext 体系，实现跨系统 Trace 关联：
+
+- **全局唯一追踪 ID**: 32 位十六进制 `trace_id`，支持跨系统关联
+- **运行实例标识**: `run_id` + `turn_id` 明确单次执行边界
+- **双向索引**: 支持通过 `session_id` 或 `run_id` 快速查找上下文
+- **Span 栈管理**: 支持并发场景下的 Span 层级追踪
+- **Hook 状态追踪**: 记录已处理的 Hook，防止重复处理
+
+**新增文件**:
+- `src/agent_trace/core/trace_context.py` - TraceContext 和 TraceContextManager 实现
+
+#### 2. Span 类型体系补充
+
+补充 6 种 Span 类型，完整对标 OpenClaw 的数据结构：
+
+| 类型 | 用途 | 使用位置 | OpenClaw 对应 |
+|------|------|----------|---------------|
+| `entry` | 请求入口，作为根 Span | `start_turn()` 时创建 | `openclaw_request` |
+| `prompt` | 记录提示词信息 | `start_step()` 时创建 | `user_message` |
+| `message` | 消息记录（预留） | 未来扩展 | - |
+| `rag` | 检索增强生成（预留） | 未来扩展 | - |
+| `session` | 会话生命周期（预留） | 未来扩展 | - |
+| `gateway` | 网关层面监控 | `monitor.py` 启动时 | 服务级监控 |
+
+**与 OpenClaw 对齐的 Trace 结构**:
+```
+entry (root)                    ← 对应 openclaw_request
+└── agent (agent_turn)
+    ├── prompt (prompt_1)       ← 对应 user_message
+    └── model (step_n)          ← 对应 model_provider/model_name
+        ├── tool:read           ← 对应 read tool
+        ├── tool:write          ← 对应 write tool
+        └── tool:shell          ← 对应其他 tools
+```
+
+**OpenClaw 兼容性**: 结构设计与官方 OpenClaw Trace 插件保持一致，便于在 CozeLoop 中进行对比分析。
+
+#### 3. Token 追踪增强（OpenTelemetry 标准）
+
+重写 `update_token_usage()` 方法，支持 `gen_ai.*` 标准属性，实现 OpenClaw 同等级别的 Token 消耗统计：
+
+**新增属性**:
+- `gen_ai.usage.input_tokens` - 输入 Token 数
+- `gen_ai.usage.output_tokens` - 输出 Token 数
+- `gen_ai.usage.cache_read_tokens` - 缓存读取 Token 数
+- `gen_ai.usage.cache_write_tokens` - 缓存写入 Token 数
+- `gen_ai.usage.total_tokens` - 总 Token 数
+- `gen_ai.provider.name` - 模型提供商
+- `gen_ai.request.model` - 模型名称
+
+**应用场景**（对标 OpenClaw 文档）:
+- **统计 Token 消耗**: 在 CozeLoop 观测 > 统计页面查看不同模型的 Token 消耗
+- **成本控制**: 分析各模型调用成本，优化使用策略
+- **缓存效率分析**: 通过 cache_read/write 评估缓存命中率
+
+**与 OpenClaw 兼容**:
+- 缓存 Token 映射对齐 OpenClaw 格式 (`cacheRead`/`cacheWrite`)
+- 支持官方文档描述的 `usage` 字段结构
+
+#### 4. Runtime 信息设置
+
+新增动态 Runtime 信息检测和设置，自动识别 AI IDE 类型：
+
+- **动态 Agent 类型检测**: 
+  - 优先级 1: `AGENT_TYPE` 环境变量
+  - 优先级 2: 父进程名称检测（区分 Kimi CLI / Claude Code）
+  - 优先级 3: 默认 `kimi_cli`
+- **Runtime 对象设置**: 在 Root Span 上设置 `language/library/scene`
+
+**新增方法**:
+- `_detect_agent_type()` - 三层检测机制
+- `_create_runtime()` - 创建 Runtime 对象
+
+**使用场景**:
+- 多 AI IDE 环境（同时安装 Kimi CLI 和 Claude Code）时自动区分来源
+- 在 CozeLoop 中按 Agent 类型过滤和分析 Trace 数据
+
+#### 5. Gateway Span 实现
+
+在 Monitor 启动时创建 Gateway Span，提供服务级可观测性（类似于 OpenClaw 网关监控）：
+
+**包含属性**:
+- `gateway.version` - agent-trace 版本号
+- `gateway.working_dir` - 工作目录
+- `gateway.sessions_dir` - 会话目录
+- `gateway.poll_interval` - 轮询间隔
+- `gateway.deduplication` - 去重启用状态
+- `gateway.persistent_offset` - Offset 持久化状态
+- `gateway.hostname` - 主机名
+- `gateway.pid` - 进程 ID
+
+**生命周期**: 服务启动时创建，停止时结束（记录运行时长和统计信息）
+
+**监控价值**:
+- 追踪 AgentTrace 服务本身的运行状态
+- 统计服务运行时长、处理的 Session 数量
+- 在 CozeLoop 中独立查看 Gateway 维度指标
+
+#### 6. Bug 修复
+
+**修复 ToolCall/ToolResult 解析错误**:
+- **问题**: `parse_tool_call()` 方法错误地期望嵌套格式 `{"tool_call": {...}}`，但 Kimi CLI v1.17.0 实际输出直接格式 `{"type": "function", "function": {...}}`
+- **影响**: 所有工具名称显示为 "unknown"，Tool Span 无法正确关联到 Model Span
+- **修复**: 更新解析逻辑，同时支持直接格式和嵌套格式
+  ```python
+  if 'tool_call' in payload:
+      tool_call = payload.get('tool_call', {})
+  else:
+      tool_call = payload  # 直接格式（Kimi CLI v1.17.0）
+  ```
+- **验证**: 修复后工具名称正确显示（如 `Tool Shell started`、`Tool Glob started`）
+
+**修复 Tool Span 上报问题**:
+- **问题**: 由于 Token 认证错误（HTTP 401）和缓存代码，Tool Span 实际上报失败
+- **修复**: 
+  1. 清除 Python 缓存 (`__pycache__`, `*.pyc`)
+  2. 使用正确的 `COZELOOP_API_TOKEN`
+  3. 验证 Tool Span 正确关联到父级 Model Span
+- **结果**: Tool Span 现在正确显示在 CozeLoop 仪表盘中
+
+#### 7. 其他改进
+
+- **版本号更新**: v0.3.3 → v0.3.4
+- **Entry Span 集成**: 作为真正的根节点，Agent Span 作为子节点
+- **Prompt Span 自动创建**: 在每个 Step 开始前记录用户输入
+- **Trace 标签增强**: Root Span 自动附加 `trace_id` 和 `run_id` 标签
+- **逐步上报机制**: 已完成的 Span 立即上报，实时查看执行状态
+
+**修改文件**:
+- `src/agent_trace/core/session_state.py` - 核心优化（Span 类型、Token 追踪、Runtime）
+- `src/agent_trace/core/monitor.py` - Gateway Span
+- `src/agent_trace/core/trace_context.py` - 新增 TraceContext 管理
+- `src/agent_trace/core/__init__.py` - 导出新增模块
+- `src/agent_trace/parsers/wire_parser.py` - ToolCall/ToolResult 解析修复
+
+---
+
+### 📊 在 CozeLoop 中查看 Trace 数据
+
+完成上述更新后，启动 AgentTrace 并发起一次 Kimi CLI 对话：
+
+1. **访问 CozeLoop 工作空间**: https://www.coze.cn/loop/
+2. **进入观测 > Trace 页面**
+3. **设置上报类型为 SDK 上报**
+4. **查看 Trace 数据**:
+   - 点击任意 Trace 查看详细的 Span 调用链
+   - 切换到 "All Span" 视图查看实时执行状态
+   - 查看 Tool Span 的输入/输出和耗时信息
+
+**排查问题**:
+- 如果 Tool Span 未显示，检查日志中是否有 `Tool started` 和 `Tool finished`
+- 如果有 HTTP 401 错误，确认 `COZELOOP_API_TOKEN` 是否正确
+- 使用 `agent-trace --status` 检查服务运行状态
+
+---
+
 ## [0.3.3] - 2026-03-18
 
 ### 🔧 核心 Bug 修复（13+ 项）

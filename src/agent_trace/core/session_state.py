@@ -1,35 +1,50 @@
 #!/usr/bin/env python3
 """
-Session 状态管理（v0.3.2 增强版）
+Session 状态管理（v0.3.4 优化版）
 
-新增功能：
-1. 事件唯一 ID 生成（借鉴 LangSmith run_id）
-2. 去重检查集成
-3. Span 创建幂等性保证
-4. 增强日志输出（用于调试重复问题）
+优化内容：
+1. 补充 Span 类型常量（entry/message/prompt/rag/session/gateway）
+2. 增强 Token 追踪（gen_ai.* 标准属性）
+3. 添加 Runtime 信息设置（动态 Agent 类型检测）
+4. 引入 TraceContext 管理机制
+5. 事件唯一 ID 生成（借鉴 LangSmith run_id）
+6. 去重检查集成
+7. Span 创建幂等性保证
 """
 
 import hashlib
+import os
 import time
 import logging
 from typing import Optional, Dict, Any, List
 
 import cozeloop
 from cozeloop.spec import tracespec
+from cozeloop.spec.tracespec import Runtime
 
 from ..utils.retry import retry_sdk_call
 from .dedup import EventDeduplicator, EventID
+from .trace_context import TraceContext, TraceContextManager, trace_manager
 
 logger = logging.getLogger("agent_trace")
 
 
 class SessionState:
-    """管理单个 Session 的 Trace 状态"""
+    """管理单个 Session 的 Trace 状态（v0.3.4 优化版）"""
     
-    # Span 类型常量
+    # ========== Span 类型常量（完整版）==========
+    # 原有类型
     SPAN_TYPE_AGENT = "agent"
     SPAN_TYPE_MODEL = tracespec.V_MODEL_SPAN_TYPE  # "model"
     SPAN_TYPE_TOOL = tracespec.V_TOOL_SPAN_TYPE    # "tool"
+    
+    # 新增类型（P0）
+    SPAN_TYPE_ENTRY = "entry"           # 请求入口
+    SPAN_TYPE_MESSAGE = "message"       # 消息记录
+    SPAN_TYPE_PROMPT = "prompt"         # 提示词
+    SPAN_TYPE_RAG = "rag"               # 检索增强生成
+    SPAN_TYPE_SESSION = "session"       # 会话生命周期
+    SPAN_TYPE_GATEWAY = "gateway"       # 网关层面
     
     def __init__(
         self,
@@ -49,7 +64,12 @@ class SessionState:
         self.deduplicator = deduplicator
         self.turn_index = turn_index
         
-        # Span 引用 - 层级结构: root -> step -> tool
+        # P0: TraceContext 集成
+        self.trace_context: Optional[TraceContext] = None
+        self._context_manager = trace_manager
+        
+        # Span 引用 - 层级结构: entry -> root -> step -> tool
+        self.entry_span: Optional[Any] = None      # 新增：entry span
         self.root_span: Optional[Any] = None
         self.current_step: Optional[Any] = None
         self.active_tools: Dict[str, Any] = {}
@@ -57,11 +77,18 @@ class SessionState:
         # Token 累计
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_write_tokens = 0
+        self.total_tokens = 0
         self.context_usage = 0.0
         
         # 模型信息
         self.model_name = "unknown"
         self.model_provider = "moonshot"
+        
+        # P0: 动态 Agent 类型检测
+        self.agent_type = self._detect_agent_type()
+        self.agent_version = "0.3.4"
         
         # 内容累积
         self.last_user_message = ""
@@ -81,6 +108,49 @@ class SessionState:
             "tool_call": 0,
             "duplicate_blocked": 0
         }
+    
+    # ========== P0: Agent 类型检测 ==========
+    
+    def _detect_agent_type(self) -> str:
+        """
+        检测 Agent 类型（Kimi CLI vs Claude Code）
+        
+        检测优先级：
+        1. 环境变量 AGENT_TYPE（最高优先级）
+        2. 父进程名称
+        3. 默认值 kimi_cli
+        """
+        # 1. 环境变量（最高优先级）
+        env_agent = os.getenv('AGENT_TYPE')
+        if env_agent:
+            return env_agent.lower()
+        
+        # 2. 进程名称检测
+        try:
+            import psutil
+            parent = psutil.Process().parent()
+            if parent:
+                name = parent.name().lower()
+                if 'claude' in name or 'claude-code' in name:
+                    return "claude_code"
+                if 'kimi' in name or 'kimi-cli' in name:
+                    return "kimi_cli"
+        except Exception:
+            pass
+        
+        # 3. 默认值
+        return "kimi_cli"
+    
+    def _create_runtime(self) -> Runtime:
+        """创建 Runtime 对象"""
+        runtime = Runtime()
+        runtime.language = "python"
+        runtime.library = "agent-trace"
+        runtime.scene = os.getenv('COZELOOP_SCENE', 'CLI')
+        runtime.loop_sdk_version = self.agent_version
+        return runtime
+    
+    # ========== 事件 ID 生成与去重 ==========
     
     def _generate_event_id(self, event_type: str, step_n: int = 0, timestamp: float = 0) -> str:
         """
@@ -143,6 +213,8 @@ class SessionState:
                 span_id=span_id
             )
     
+    # ========== Turn/Span 生命周期管理 ==========
+    
     @retry_sdk_call(max_retries=2, initial_delay=0.5)
     def start_turn(self, timestamp: float, user_input: str) -> Optional[Any]:
         """
@@ -178,30 +250,64 @@ class SessionState:
         self.last_user_message = user_input
         
         try:
-            # 创建 Root Span (agent 类型)
+            # P0: 创建 TraceContext
+            run_id = f"{self.session_id}_{self.turn_index}_{int(timestamp * 1000)}"
+            self.trace_context = self._context_manager.start_turn(
+                run_id=run_id,
+                channel_id=self.session_id,
+                turn_id=run_id,
+            )
+            self.trace_context.turn_state.user_input = user_input
+            
+            # P0: 创建 Entry Span 作为真正的根节点
+            self.entry_span = cozeloop.start_span(
+                "session_entry",
+                self.SPAN_TYPE_ENTRY
+            )
+            self.entry_span.set_tags({
+                "session_id": self.session_id,
+                "entry_type": "user_request",
+                "trace_id": self.trace_context.trace_id,
+            })
+            self.entry_span.set_input(user_input)
+            
+            # P0: Agent Span 作为 Entry 的子节点
             self.root_span = cozeloop.start_span(
                 "agent_turn",
-                self.SPAN_TYPE_AGENT
+                self.SPAN_TYPE_AGENT,
+                child_of=self.entry_span,
             )
-            self.root_span.set_input(user_input)
+            
+            # P0: 设置 Runtime 信息
+            runtime = self._create_runtime()
+            self.root_span.set_runtime(runtime)
+            
+            # P0: 设置标签（使用动态检测的 agent_type）
             self.root_span.set_tags({
                 "session_id": self.session_id,
-                "agent_type": "kimi_cli",
-                "agent_version": "1.17.0",
+                "agent_type": self.agent_type,  # 动态检测，非硬编码
+                "agent_version": self.agent_version,
                 "turn_index": str(self.turn_index),
                 "event_id": event_id[:16],
+                "trace_id": self.trace_context.trace_id,
+                "run_id": self.trace_context.run_id,
             })
+            
+            self.root_span.set_input(user_input)
             
             # 重置累计值
             self.total_input_tokens = 0
             self.total_output_tokens = 0
+            self.total_cache_read_tokens = 0
+            self.total_cache_write_tokens = 0
+            self.total_tokens = 0
             self._accumulated_output = ""
             self._think_content = ""
             
             # 标记为已处理
             self._mark_processed(event_id, "turn_begin", 0)
             
-            logger.info(f"[SESSION:{self.session_id[:8]}] ✓ TurnBegin started (event_id={event_id[:16]}..., turn={self.turn_index})")
+            logger.info(f"[SESSION:{self.session_id[:8]}] ✓ TurnBegin started (trace_id={self.trace_context.trace_id[:8]}..., turn={self.turn_index})")
             return self.root_span
             
         except Exception as e:
@@ -243,10 +349,24 @@ class SessionState:
         # 重置内容累积和 token 累计（每个 step 独立计算）
         self._accumulated_output = ""
         self._think_content = ""
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
         
         try:
+            # P0: 创建 Prompt Span（在 Model Span 之前记录提示词）
+            prompt_span = cozeloop.start_span(
+                f"prompt_{step_n}",
+                self.SPAN_TYPE_PROMPT,
+                child_of=self.root_span,
+            )
+            prompt_span.set_input({
+                "user_input": self.last_user_message,
+                "step_n": step_n,
+            })
+            prompt_span.set_tags({
+                "prompt.type": "user_request",
+                "prompt.step_n": str(step_n),
+            })
+            prompt_span.finish()
+            
             # 创建 Model Span，指定 child_of 建立层级关系
             self.current_step = cozeloop.start_span(
                 f"step_{step_n}",
@@ -260,19 +380,24 @@ class SessionState:
             # 设置模型信息
             if model:
                 self.model_name = model
+                if self.trace_context:
+                    self.trace_context.turn_state.model_name = model
+            
             self.current_step.set_model_provider(self.model_provider)
             self.current_step.set_model_name(self.model_name)
             
-            # 添加去重标签
+            # 添加去重标签和 trace 信息
             self.current_step.set_tags({
                 "event_id": event_id[:16],
                 "step_n": str(step_n),
+                "trace_id": self.trace_context.trace_id if self.trace_context else "",
+                "run_id": self.trace_context.run_id if self.trace_context else "",
             })
             
             # 标记为已处理
             self._mark_processed(event_id, "step_begin", step_n)
             
-            logger.info(f"[SESSION:{self.session_id[:8]}] Step {step_n} started (event_id={event_id[:16]}...)")
+            logger.info(f"[SESSION:{self.session_id[:8]}] Step {step_n} started (model={self.model_name})")
             return self.current_step
             
         except Exception as e:
@@ -336,7 +461,7 @@ class SessionState:
             # 标记为已处理
             self._mark_processed(event_id, "tool_call", step_n, tool_call_id)
             
-            logger.info(f"[SESSION:{self.session_id[:8]}] Tool {tool_name} started (event_id={event_id[:16]}...)")
+            logger.info(f"[SESSION:{self.session_id[:8]}] Tool {tool_name} started")
             return tool_span
             
         except Exception as e:
@@ -352,7 +477,12 @@ class SessionState:
             tool_result: 工具结果信息
         """
         tool_call_id = tool_result.get('tool_call_id')
-        if not tool_call_id or tool_call_id not in self.active_tools:
+        if not tool_call_id:
+            logger.warning(f"[SESSION:{self.session_id[:8]}] Tool result missing tool_call_id")
+            return
+        
+        if tool_call_id not in self.active_tools:
+            logger.warning(f"[SESSION:{self.session_id[:8]}] Tool {tool_call_id[:16]}... not found in active_tools (keys: {list(self.active_tools.keys())})")
             return
         
         tool_span = self.active_tools[tool_call_id]
@@ -365,6 +495,8 @@ class SessionState:
         
         tool_span.finish()
         del self.active_tools[tool_call_id]
+        
+        logger.info(f"[SESSION:{self.session_id[:8]}] Tool finished")
     
     def add_content(self, timestamp: float, content_type: str, content: str):
         """
@@ -386,38 +518,64 @@ class SessionState:
             })
         elif content_type == 'text':
             self._accumulated_output += content
+            if self.trace_context:
+                self.trace_context.turn_state.assistant_output += content
+    
+    # ========== P0: 增强 Token 追踪 ==========
     
     def update_token_usage(self, token_info: Dict[str, Any]):
         """
-        更新 Token 使用量
+        更新 Token 使用量（增强版）
         
-        Args:
-            token_info: Token 使用信息
+        支持 OpenTelemetry gen_ai.* 标准属性
         """
         if not self.current_step:
             return
         
-        # 计算输入 tokens
-        input_tokens = (
-            token_info.get('input_other', 0) +
-            token_info.get('input_cache_read', 0)
-        )
+        # 提取原始数据
+        input_other = token_info.get('input_other', 0)
+        input_cache_read = token_info.get('input_cache_read', 0)
+        input_cache_creation = token_info.get('input_cache_creation', 0)
         output_tokens = token_info.get('output', 0)
         context_usage = token_info.get('context_usage', 0)
         
-        # 累计
+        # 计算标准指标
+        input_tokens = input_other + input_cache_read
+        total_tokens = input_tokens + output_tokens + input_cache_creation
+        
+        # 更新累计值
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
+        self.total_cache_read_tokens += input_cache_read
+        self.total_cache_write_tokens += input_cache_creation
+        self.total_tokens += total_tokens
         self.context_usage = context_usage
         
-        # 设置到当前 step
+        # 更新 TraceContext 中的 TurnState
+        if self.trace_context:
+            self.trace_context.turn_state.add_tokens(
+                input_tokens, output_tokens, input_cache_read, input_cache_creation
+            )
+        
+        # 设置到 SDK 标准字段
         self.current_step.set_input_tokens(input_tokens)
         self.current_step.set_output_tokens(output_tokens)
         
-        # 额外信息作为 tags
+        # === P0: 设置标准 gen_ai.* 属性 ===
         self.current_step.set_tags({
-            "input_cache_read": token_info.get('input_cache_read', 0),
-            "input_cache_creation": token_info.get('input_cache_creation', 0),
+            # 标准 OpenTelemetry 属性
+            "gen_ai.usage.input_tokens": input_tokens,
+            "gen_ai.usage.output_tokens": output_tokens,
+            "gen_ai.usage.cache_read_tokens": input_cache_read,
+            "gen_ai.usage.cache_write_tokens": input_cache_creation,
+            "gen_ai.usage.total_tokens": total_tokens,
+            
+            # 模型信息（确保一致性）
+            "gen_ai.provider.name": self.model_provider,
+            "gen_ai.request.model": self.model_name,
+            
+            # 保留原有信息作为补充
+            "input_other": input_other,
             "context_usage": f"{context_usage:.2%}",
             "message_id": token_info.get('message_id', ''),
         })
@@ -506,12 +664,28 @@ class SessionState:
         
         # 结束 root span
         if self.root_span:
+            # 包含 gen_ai.* 标准属性的最终统计
             self.root_span.set_output({
-                "total_tokens": self.total_input_tokens + self.total_output_tokens,
+                "total_tokens": self.total_tokens,
+                "input_tokens": self.total_input_tokens,
+                "output_tokens": self.total_output_tokens,
+                "cache_read_tokens": self.total_cache_read_tokens,
+                "cache_write_tokens": self.total_cache_write_tokens,
                 "context_usage": f"{self.context_usage:.2%}",
+                "gen_ai.usage.total_tokens": self.total_tokens,
             })
             self.root_span.finish()
             self.root_span = None
+        
+        # 结束 entry span
+        if self.entry_span:
+            self.entry_span.finish()
+            self.entry_span = None
+        
+        # 结束 TraceContext
+        if self.trace_context:
+            self._context_manager.end_turn(self.trace_context.run_id)
+            self.trace_context = None
         
         # 清理当前会话缓存
         self._processed_spans.clear()

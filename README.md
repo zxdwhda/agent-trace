@@ -12,7 +12,7 @@
 
 ## 📋 功能特性
 
-### ✅ 当前版本 v0.3.3
+### ✅ 当前版本 v0.3.4
 
 | 特性 | 状态 | 说明 |
 |-----|------|------|
@@ -22,7 +22,42 @@
 | 文件指纹检测 | ✅ | 防止 inode 复用问题 |
 | 开机自启动 | ✅ | macOS/Linux/Windows 全支持 |
 | Trace 层级结构 | ✅ | agent → model → tool 正确嵌套 |
-| Claude Code 监控 | 🚧 | v0.4.0 开发中 |
+| **TraceContext 管理** | ✅ **v0.3.4 新增** | trace_id/run_id/turn_id 完整追踪 |
+| **Span 类型体系** | ✅ **v0.3.4 新增** | entry/prompt/gateway 等 9 种类型 |
+| **gen_ai.* 标准** | ✅ **v0.3.4 新增** | OpenTelemetry 兼容的 Token 追踪 |
+| **Runtime 信息** | ✅ **v0.3.4 新增** | 动态 Agent 类型检测 |
+| **Gateway Span** | ✅ **v0.3.4 新增** | 服务级别可观测性 |
+| Claude Code 监控 | 🚧 | v0.5.0 开发中 |
+
+### 🔄 与 OpenClaw 官方实现对齐
+
+AgentTrace v0.3.4 参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://www.coze.cn/docs/developer_guides/openclaw_cozeloop_trace) 进行了深度重构，实现与官方 OpenClaw 同等级别的 Trace 上报能力：
+
+| 功能 | OpenClaw 官方插件 | AgentTrace (v0.3.4) |
+|------|------------------|---------------------|
+| **Trace 层级结构** | `openclaw_request` → `agent` → `model` → `tool` | ✅ `entry` → `agent` → `model` → `tool` |
+| **Span 类型** | entry, prompt, model, tool, gateway... | ✅ 9 种类型完整对齐 |
+| **Token 追踪** | `gen_ai.usage.*` 标准属性 | ✅ OpenTelemetry 兼容 |
+| **上下文管理** | `trace_id`/`run_id`/`turn_id` | ✅ TraceContext 完整实现 |
+| **Runtime 信息** | 自动检测 OpenClaw 版本和环境 | ✅ 动态 Agent 类型检测 |
+| **Gateway 监控** | 网关级别服务监控 | ✅ Gateway Span 实现 |
+| **逐步上报** | 已完成节点先上报 | ✅ 实时上报机制 |
+| **目标平台** | CozeLoop 罗盘 | ✅ CozeLoop 罗盘 |
+
+**应用场景对比**:
+
+| 应用场景 | OpenClaw | AgentTrace |
+|----------|----------|------------|
+| **Token 消耗统计** | 观测 > 统计页面查看模型 Token 消耗 | ✅ 同样支持，按模型维度统计 |
+| **问题排查** | All Span 视图实时跟进执行状态 | ✅ 同样支持，实时查看 Tool 调用链 |
+| **工具调用分析** | 查看 read/write 等 tool 的执行详情 | ✅ 支持 Shell/Glob/ReadFile 等所有工具 |
+| **多轮对话追踪** | 通过 `turn_id` 区分多轮 | ✅ 同样支持 `turn_id` 递增 |
+
+**AgentTrace 的独特优势**:
+- 🎯 **多 IDE 支持**: 不仅支持 Kimi CLI，还可扩展支持 Claude Code 等其他 AI IDE
+- 🔄 **去重机制**: 三层去重（内存+SQLite），防止重复上报
+- 💾 **断点续传**: Offset 持久化，重启后从断点继续
+- 🚀 **开机自启**: 跨平台自启动支持（macOS/Linux/Windows）
 
 ---
 
@@ -186,27 +221,47 @@ agent-trace autostart uninstall
 
 ## 📊 Trace 数据结构
 
-### Span 层级关系
+### Span 层级关系（v0.3.4 更新）
 
 ```
-agent_turn (root_span)
+session_entry (entry_span) - 请求入口
 ├── tags:
 │   ├── session_id: "xxx"
-│   ├── agent_type: "kimi_cli"
-│   └── turn_index: "0"
-├── step_1 (model_span)
-│   ├── set_input(): 用户输入
-│   ├── set_output(): 模型输出
-│   ├── set_model_name(): "kimi-k2"
-│   ├── set_input_tokens(): 1000
-│   ├── set_output_tokens(): 500
-│   └── tool:Glob (tool_span)
-│       ├── set_input(): {"tool_name": "Glob", "arguments": {...}}
-│       └── set_output(): {"result": "..."}
-├── step_2 (model_span)
-│   └── ...
-└── output: {"total_tokens": 1500, "context_usage": "80%"}
+│   ├── trace_id: "61ad2bed..." (32位)
+│   └── entry_type: "user_request"
+└── agent_turn (agent_span) [Runtime]
+    ├── tags:
+    │   ├── agent_type: "kimi_cli" (动态检测)
+    │   ├── agent_version: "0.3.4"
+    │   ├── run_id: "session_0_1773818952338"
+    │   └── turn_index: "0"
+    ├── prompt_1 (prompt_span)
+    │   ├── input: {"user_input": "...", "step_n": 1}
+    │   └── tags: {"prompt.type": "user_request"}
+    └── step_1 (model_span) [gen_ai.* 属性]
+        ├── set_input(): 用户输入
+        ├── set_output(): 模型输出
+        ├── set_model_name(): "kimi-k2"
+        ├── set_input_tokens(): 1000
+        ├── set_output_tokens(): 500
+        ├── tags:
+        │   ├── gen_ai.usage.input_tokens: 1000
+        │   ├── gen_ai.usage.output_tokens: 500
+        │   ├── gen_ai.usage.cache_read_tokens: 200
+        │   ├── gen_ai.usage.total_tokens: 1500
+        │   ├── gen_ai.provider.name: "moonshot"
+        │   └── gen_ai.request.model: "kimi-k2"
+        └── tool:Glob (tool_span)
+            ├── set_input(): {"tool_name": "Glob", "arguments": {...}}
+            └── set_output(): {"result": "..."}
 ```
+
+**v0.3.4 新增特性**:
+- **Entry Span**: 作为请求入口的根节点
+- **Prompt Span**: 在每个 Step 前记录用户输入
+- **Trace 标签**: `trace_id` 和 `run_id` 支持跨系统关联
+- **Runtime 信息**: `agent_type` 动态检测（Kimi CLI / Claude Code）
+- **gen_ai.***: OpenTelemetry 标准 Token 追踪属性
 
 ---
 
@@ -290,7 +345,15 @@ agent-trace/
 
 ## 🗓️ 版本规划
 
-### v0.3.3 (当前版本)
+### v0.3.4 (当前版本) - OpenClaw 生态对齐
+- ✅ TraceContext 管理机制（trace_id/run_id/turn_id）
+- ✅ Span 类型体系完善（entry/prompt/gateway 等 9 种）
+- ✅ Token 追踪增强（gen_ai.* 标准属性）
+- ✅ Runtime 信息设置（动态 Agent 类型检测）
+- ✅ Gateway Span 服务级别追踪
+- ✅ Entry → Agent → Prompt → Model → Tool 层级结构
+
+### v0.3.3 (历史版本)
 - ✅ Kimi Code CLI 完整支持
 - ✅ 事件去重机制（L1 内存缓存 + L2 SQLite）
 - ✅ Offset 持久化
@@ -300,12 +363,12 @@ agent-trace/
 - ✅ 添加命令行安全警告
 - ✅ 添加日志轮转（RotatingFileHandler）
 
-### v0.4.0 (开发中) - Claude Code 支持
+### v0.5.0 (开发中) - Claude Code 支持
 - 🚧 Claude Code stream-json 解析器
 - 🚧 Claude 事件处理器
 - 🚧 双模式监控（同时支持 Kimi + Claude）
 
-### v0.5.0 (规划中)
+### v0.6.0 (规划中)
 - ⏳ Cursor/Windsurf 支持
 - ⏳ Web Dashboard 监控面板
 - ⏳ 自定义指标上报
@@ -399,4 +462,4 @@ git push origin feature/your-feature
 ---
 
 *最后更新: 2026-03-18*
-*当前版本: v0.3.3*
+*当前版本: v0.3.4*

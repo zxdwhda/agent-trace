@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 """
-AgentTrace 监控服务（v0.3.3）
+AgentTrace 监控服务（v0.3.4 优化版）
 
 新特性：
-1. 事件去重机制（借鉴 LangSmith run_id 幂等性）
-2. Offset 持久化（借鉴 OTel FileLog Receiver）
-3. 文件指纹检测（借鉴 Vector）
-4. 截断检测（借鉴 Fluent Bit）
-5. 增强日志输出（用于调试重复问题）
+1. Gateway Span 支持（服务级别可观测性）
+2. 事件去重机制（借鉴 LangSmith run_id 幂等性）
+3. Offset 持久化（借鉴 OTel FileLog Receiver）
+4. 文件指纹检测（借鉴 Vector）
+5. 截断检测（借鉴 Fluent Bit）
+6. 增强日志输出（用于调试重复问题）
 """
 
 import os
+import platform
 import time
 from pathlib import Path
 from typing import Dict, Optional
 import logging
 
 import cozeloop
+
+# 版本号
+AGENT_TRACE_VERSION = "0.3.4"
 
 from ..parsers.jsonl_reader import IncrementalJSONLReader, JSONLRecord
 from ..parsers.wire_parser import WireEvent, WireEventType
@@ -95,11 +100,38 @@ class AgentTraceMonitor:
         self._cleanup_counter = 0
         # 每 300 次轮询执行一次清理（约10分钟）
         self._cleanup_interval = 300
+        
+        # P1: Gateway Span 相关
+        self._gateway_span = None
+        self._start_time = None
     
     def start(self):
         """启动监控服务"""
+        self._start_time = time.time()
+        
+        # === P1: 创建 Gateway Span ===
+        try:
+            self._gateway_span = cozeloop.start_span(
+                name="agenttrace_gateway", 
+                span_type="gateway"
+            )
+            self._gateway_span.set_tags({
+                "gateway.version": AGENT_TRACE_VERSION,
+                "gateway.working_dir": os.getcwd(),
+                "gateway.sessions_dir": str(self.sessions_dir),
+                "gateway.poll_interval": self.poll_interval,
+                "gateway.deduplication": self.enable_deduplication,
+                "gateway.persistent_offset": self.enable_persistent_offset,
+                "gateway.hostname": platform.node(),
+                "gateway.pid": os.getpid(),
+            })
+            logger.info("[Gateway] Gateway Span created successfully")
+        except Exception as e:
+            logger.error(f"[Gateway] Failed to create span: {e}")
+        # =============================
+        
         logger.info("=" * 60)
-        logger.info("AgentTrace Monitor v0.3.3 Starting...")
+        logger.info(f"AgentTrace Monitor v{AGENT_TRACE_VERSION} Starting...")
         logger.info(f"Sessions dir: {self.sessions_dir}")
         logger.info(f"Poll interval: {self.poll_interval}s")
         logger.info(f"Deduplication: {'enabled' if self.enable_deduplication else 'disabled'}")
@@ -135,6 +167,20 @@ class AgentTraceMonitor:
         except KeyboardInterrupt:
             logger.info("Received KeyboardInterrupt")
         finally:
+            # === P1: 结束 Gateway Span ===
+            if self._gateway_span:
+                try:
+                    uptime = time.time() - self._start_time
+                    self._gateway_span.set_output({
+                        "uptime_seconds": uptime,
+                        "total_sessions": len(self.session_states),
+                        "stop_reason": "normal" if self.running else "interrupted"
+                    })
+                    self._gateway_span.finish()
+                    logger.info(f"[Gateway] Gateway Span finished (uptime={uptime:.1f}s)")
+                except Exception as e:
+                    logger.error(f"[Gateway] Failed to finish span: {e}")
+            # =============================
             self.stop()
     
     def stop(self):
