@@ -12,7 +12,7 @@
 
 ## 📋 功能特性
 
-### ✅ 当前版本 v0.3.5
+### ✅ 当前版本 v0.4.0
 
 | 特性 | 状态 | 说明 |
 |-----|------|------|
@@ -27,13 +27,17 @@
 | **gen_ai.* 标准** | ✅ v0.3.4 新增 | OpenTelemetry 兼容的 Token 追踪 |
 | **Runtime 信息** | ✅ v0.3.4 新增 | 动态 Agent 类型检测 |
 | **Gateway Span** | ✅ v0.3.4 新增 | 服务级别可观测性 |
+| **Web Dashboard** | ✅ v0.4.0 新增 | FastAPI + React 18 本地管理界面 |
+| **SQLite 指标存储** | ✅ v0.4.0 新增 | 本地持久化 Token/会话/技能统计 |
+| **Tauri 桌面应用** | ✅ v0.4.0 新增 | macOS 原生桌面壳 |
+| **双模式上报** | ✅ v0.4.0 新增 | 官方 SDK + 开源 HTTP API |
 | Claude Code 监控 | 🚧 | v0.5.0 开发中 |
 
 ### 🔄 与 OpenClaw 官方实现对齐
 
-AgentTrace v0.3.5 参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://www.coze.cn/docs/developer_guides/openclaw_cozeloop_trace) 进行了深度重构，实现与官方 OpenClaw 同等级别的 Trace 上报能力：
+AgentTrace v0.4.0 参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://www.coze.cn/docs/developer_guides/openclaw_cozeloop_trace) 进行了深度重构，实现与官方 OpenClaw 同等级别的 Trace 上报能力：
 
-| 功能 | OpenClaw 官方插件 | AgentTrace (v0.3.5) |
+| 功能 | OpenClaw 官方插件 | AgentTrace (v0.4.0) |
 |------|------------------|---------------------|
 | **Trace 层级结构** | `openclaw_request` → `agent` → `model` → `tool` | ✅ `entry` → `agent` → `model` → `tool` |
 | **Span 类型** | entry, prompt, model, tool, gateway... | ✅ 9 种类型完整对齐 |
@@ -41,6 +45,9 @@ AgentTrace v0.3.5 参考扣子官方 [OpenClaw CozeLoop Trace 插件](https://ww
 | **上下文管理** | `trace_id`/`run_id`/`turn_id` | ✅ TraceContext 完整实现 |
 | **Runtime 信息** | 自动检测 OpenClaw 版本和环境 | ✅ 动态 Agent 类型检测 |
 | **Gateway 监控** | 网关级别服务监控 | ✅ Gateway Span 实现 |
+| **Web Dashboard** | - | ✅ 本地 Dashboard + 实时监控 |
+| **SQLite 存储** | - | ✅ 本地指标持久化 |
+| **Tauri 桌面壳** | - | ✅ macOS 原生应用 |
 | **逐步上报** | 已完成节点先上报 | ✅ 实时上报机制 |
 | **目标平台** | CozeLoop 罗盘 | ✅ CozeLoop 罗盘 |
 
@@ -221,7 +228,7 @@ agent-trace autostart uninstall
 
 ## 📊 Trace 数据结构
 
-### Span 层级关系（v0.3.5 更新）
+### Span 层级关系（v0.3.5 → v0.4.0 更新）
 
 ```
 session_entry (entry_span) - 请求入口
@@ -232,7 +239,7 @@ session_entry (entry_span) - 请求入口
 └── agent_turn (agent_span) [Runtime]
     ├── tags:
     │   ├── agent_type: "kimi_cli" (动态检测)
-    │   ├── agent_version: "0.3.5"
+    │   ├── agent_version: "0.4.0"
     │   ├── run_id: "session_0_1773818952338"
     │   └── turn_index: "0"
     ├── prompt_1 (prompt_span)
@@ -255,6 +262,12 @@ session_entry (entry_span) - 请求入口
             ├── set_input(): {"tool_name": "Glob", "arguments": {...}}
             └── set_output(): {"result": "..."}
 ```
+
+**v0.4.0 新增特性**:
+- 🖥️ **Web Dashboard**: FastAPI + React 18 本地管理界面，支持实时监控、会话管理、技能分析
+- 💾 **SQLite 指标存储**: `~/.agent_trace/metrics.db` 本地持久化所有 Token/会话/技能统计
+- 🪟 **Tauri 桌面应用**: macOS 原生桌面壳，一键打包
+- 📡 **双模式上报**: `--cozeloop-mode official\|opensource\|both` 支持官方 SDK 和开源 HTTP API
 
 **v0.3.5 新增特性**:
 - **Entry Span**: 作为请求入口的根节点
@@ -345,7 +358,16 @@ agent-trace/
 
 ## 🗓️ 版本规划
 
-### v0.3.5 (当前版本) - Root Span 修复
+### v0.4.0 (当前版本) - Web Dashboard + Tauri 桌面应用 + SQLite 存储
+
+- 🖥️ Web Dashboard（FastAPI + React 18 + WebSocket 实时推送）
+- 💾 SQLite 本地指标存储（turn_metrics / session_summary / tool_calls / activity_log）
+- 🪟 Tauri 2 桌面应用（macOS 支持）
+- 📡 双模式 Sink 上报（官方 SDK + 开源 HTTP API）
+- 📊 实时监控面板（活跃会话、Token 吞吐、技能热度 Top 5）
+- 📥 批量导入历史 wire.jsonl 会话数据
+
+### v0.3.5 - Root Span 修复
 - ✅ Root Span 正确上报（使用 client.start_span + start_new_trace）
 - ✅ 延迟结束机制优化（100ms → 500ms）
 - ✅ SDK 调用方式统一（client 实例替代全局函数）
@@ -467,4 +489,4 @@ git push origin feature/your-feature
 ---
 
 *最后更新: 2026-03-18*
-*当前版本: v0.3.5*
+*当前版本: v0.4.0*

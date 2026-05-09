@@ -33,6 +33,9 @@ from ..handlers.event_handler import (
 from .session_state import SessionState
 from .dedup import EventDeduplicator
 from .persistent_offset import PersistentOffsetStore
+from .event_bus import event_bus
+from .sink import Sink
+from ..web.metrics_store import get_metrics_store
 
 logger = logging.getLogger("agent_trace")
 
@@ -46,7 +49,8 @@ class AgentTraceMonitor:
         poll_interval: float = 2.0,
         active_timeout_minutes: int = 30,
         enable_deduplication: bool = True,
-        enable_persistent_offset: bool = True
+        enable_persistent_offset: bool = True,
+        sink: Optional[Sink] = None,
     ):
         """
         初始化监控服务
@@ -63,6 +67,7 @@ class AgentTraceMonitor:
         self.active_timeout_minutes = active_timeout_minutes
         self.enable_deduplication = enable_deduplication
         self.enable_persistent_offset = enable_persistent_offset
+        self.sink = sink
         
         # 去重管理器
         self.deduplicator: Optional[EventDeduplicator] = None
@@ -78,6 +83,7 @@ class AgentTraceMonitor:
         self.file_readers: Dict[str, IncrementalJSONLReader] = {}
         # Session 状态映射
         self.session_states: Dict[str, SessionState] = {}
+        self.metrics_store = get_metrics_store()
         
         # 事件处理器映射
         self.handlers = {
@@ -370,7 +376,8 @@ class AgentTraceMonitor:
         self.session_states[session_id] = SessionState(
             session_id=session_id,
             deduplicator=self.deduplicator,
-            turn_index=0
+            turn_index=0,
+            sink=self.sink,
         )
         
         logger.info(f"[REGISTER] Registered file: {session_id[:16]}... (filepath={filepath})")
@@ -433,6 +440,9 @@ class AgentTraceMonitor:
         try:
             result = handler.handle(state, event)
             
+            # 推送事件到 EventBus（供 Web Dashboard 实时展示）
+            self._emit_event(event.event_type.value, session_id, event.payload, state)
+            
             # 日志记录关键事件
             if event.event_type == WireEventType.TURN_BEGIN:
                 user_input = event.payload.get('user_input', '')
@@ -454,6 +464,35 @@ class AgentTraceMonitor:
         except Exception as e:
             logger.error(f"[EVENT:{session_id[:8]}] Error handling event {event.event_type}: {e}", exc_info=True)
     
+    def _emit_event(self, event_type: str, session_id: str, payload: Dict, state: SessionState):
+        """推送事件到 EventBus"""
+        try:
+            event_payload = dict(payload)
+            # 补充状态信息
+            event_payload["model_name"] = state.model_name
+            event_payload["turn_index"] = state.turn_index
+            event_payload["total_tokens"] = state.total_tokens
+            event_bus.put_sync(event_type, session_id, event_payload)
+        except Exception as e:
+            logger.debug(f"EventBus emit error: {e}")
+
+        # TurnEnd 时持久化到 metrics.db
+        if event_type == "TurnEnd":
+            try:
+                self.metrics_store.record_turn(
+                    session_id=session_id,
+                    turn_index=state.turn_index,
+                    model_name=state.model_name,
+                    input_tokens=state.total_input_tokens,
+                    output_tokens=state.total_output_tokens,
+                    cache_read_tokens=state.total_cache_read_tokens,
+                    cache_write_tokens=state.total_cache_write_tokens,
+                    total_tokens=state.total_tokens,
+                    agent_type=state.agent_type,
+                )
+            except Exception as e:
+                logger.warning(f"[METRICS] Failed to record turn: {e}")
+
     def get_stats(self) -> Dict:
         """获取监控统计信息"""
         stats = {

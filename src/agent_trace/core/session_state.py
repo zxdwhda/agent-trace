@@ -31,7 +31,7 @@ logger = logging.getLogger("agent_trace")
 
 
 class SessionState:
-    """管理单个 Session 的 Trace 状态（v0.3.5 - Root Span 修复版）""
+    """管理单个 Session 的 Trace 状态（v0.3.5 - Root Span 修复版）"""
     
     # ========== Span 类型常量（完整版）==========
     # 原有类型
@@ -51,11 +51,11 @@ class SessionState:
         self,
         session_id: str,
         deduplicator: Optional[EventDeduplicator] = None,
-        turn_index: int = 0
+        turn_index: int = 0,
+        sink: Optional[Any] = None,
     ):
-        """
-        初始化 Session 状态
-        
+        """初始化 Session 状态。
+
         Args:
             session_id: 会话 ID
             deduplicator: 去重管理器
@@ -64,6 +64,8 @@ class SessionState:
         self.session_id = session_id
         self.deduplicator = deduplicator
         self.turn_index = turn_index
+        self.sink = sink
+        self._turn_start_time = 0.0
         
         # P0: TraceContext 集成
         self.trace_context: Optional[TraceContext] = None
@@ -249,6 +251,7 @@ class SessionState:
         
         self._event_counter["turn_begin"] += 1
         self.last_user_message = user_input
+        self._turn_start_time = timestamp
         
         try:
             # P0: 创建 TraceContext
@@ -727,6 +730,14 @@ class SessionState:
                 if trace_context_ref:
                     self._context_manager.end_turn(trace_context_ref.run_id)
                     logger.info(f"[SESSION:{session_id[:8]}] TraceContext ended (delayed)")
+                
+                # Sink 上报
+                if self.sink:
+                    try:
+                        self.sink.report_turn_end(self)
+                        logger.info(f"[SESSION:{session_id[:8]}] Sink reported turn end")
+                    except Exception as e:
+                        logger.warning(f"[SESSION:{session_id[:8]}] Sink report failed: {e}")
                 
                 logger.info(f"[SESSION:{session_id[:8]}] Turn ended and session cache cleared (delayed)")
                 

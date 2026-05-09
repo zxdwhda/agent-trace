@@ -211,6 +211,24 @@ def parse_args():
         action='store_true',
         help='Check if AgentTrace is running and show status'
     )
+    parser.add_argument(
+        '--no-web',
+        action='store_true',
+        default=os.getenv('AGENTTRACE_NO_WEB', '').lower() in ('1', 'true', 'yes'),
+        help='Disable Web Dashboard (env: AGENTTRACE_NO_WEB)'
+    )
+    parser.add_argument(
+        '--web-port',
+        type=int,
+        default=int(os.getenv('AGENTTRACE_WEB_PORT', '18765')),
+        help='Web Dashboard port (env: AGENTTRACE_WEB_PORT)'
+    )
+    parser.add_argument(
+        '--cozeloop-mode',
+        default=os.getenv('COZELOOP_MODE', 'official'),
+        choices=['official', 'opensource', 'both'],
+        help='CozeLoop上报模式: official(官方SDK), opensource(开源HTTP), both(双写) (env: COZELOOP_MODE)'
+    )
     
     return parser.parse_args()
 
@@ -323,6 +341,16 @@ def _run_monitor(args):
     if args.daemon:
         daemonize()
     
+    # 创建 Sink
+    from .core.sink import create_sink
+    sink = create_sink(
+        mode=args.cozeloop_mode,
+        base_url=os.getenv('COZELOOP_OPENSOURCE_BASE'),
+        workspace_id=config.workspace_id,
+        api_token=config.api_token,
+    )
+    logger.info(f"CozeLoop mode: {args.cozeloop_mode}")
+
     # 创建监控服务
     enable_deduplication = not args.disable_dedup
     enable_persistent_offset = not args.disable_offset
@@ -332,7 +360,37 @@ def _run_monitor(args):
         poll_interval=config.poll_interval,
         enable_deduplication=enable_deduplication,
         enable_persistent_offset=enable_persistent_offset,
+        sink=sink,
     )
+    
+    # 启动 Web Dashboard 服务器（可选）
+    if not args.no_web:
+        try:
+            from .web.api import status as status_api
+            from .web.api import sessions as sessions_api
+            from .web.api import live as live_api
+            status_api.set_monitor(monitor)
+            sessions_api.set_monitor(monitor)
+            live_api.set_monitor(monitor)
+            
+            import threading
+            import uvicorn
+            from .web.server import app
+            
+            def run_web():
+                uvicorn.run(
+                    app,
+                    host="127.0.0.1",
+                    port=args.web_port,
+                    log_level="warning",
+                    access_log=False,
+                )
+            
+            web_thread = threading.Thread(target=run_web, daemon=True)
+            web_thread.start()
+            logger.info(f"Web Dashboard started at http://127.0.0.1:{args.web_port}")
+        except Exception as e:
+            logger.warning(f"Failed to start Web Dashboard: {e}")
     
     # 信号处理
     _shutdown_requested = False

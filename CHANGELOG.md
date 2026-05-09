@@ -7,6 +7,117 @@
 
 ---
 
+## [0.4.0] - 2026-05-09
+
+### 🎉 重大更新 - Web Dashboard + Tauri 桌面应用
+
+本次更新从纯 CLI 工具扩展为完整的桌面级可观测平台，新增 Web Dashboard、Tauri 桌面壳、SQLite 本地指标存储、双模式上报等能力。
+
+---
+
+### 🖥️ Web Dashboard（全新）
+
+基于 FastAPI + React 18 的完整 Web 管理界面，端口默认 `18765`。
+
+**后端（`src/agent_trace/web/`，13 个文件，1747 行）**:
+
+- **`server.py`** - FastAPI 入口，含 WebSocket `/ws/events` 实时事件推送、静态文件服务、CORS
+- **`metrics_store.py`** - SQLite 本地存储（`~/.agent_trace/metrics.db`），四张核心表：
+  - `turn_metrics` - Turn 级别 Token 统计
+  - `session_summary` - 会话汇总（first_seen/last_active/archived）
+  - `tool_calls` - 技能调用聚合
+  - `activity_log` - 系统操作审计日志
+- **`api/sessions.py`** - 会话列表（活跃 + 历史合并）、详情、删除、归档/恢复
+- **`api/import_batch.py`** - 批量导入 `~/.kimi/sessions/**/wire.jsonl` 历史数据，支持日期范围筛选和去重
+- **`api/skills.py`** - 技能分析（按 ToolCall function name 聚合）
+- **`api/status.py`** - 系统状态（活跃会话数、监控文件数、今日统计）
+- **`api/live.py`** - 实时监控 API（活跃会话、Token 吞吐、技能热度 Top 5）
+- **`api/activities.py`** - 最近系统活动日志
+- **`api/config.py`** / **`api/control.py`** / **`api/prompt_optimizer.py`** - 配置、控制、提示词建议
+
+**前端（`web/`，34 个文件）**:
+
+- React 18 + TypeScript + Vite + TailwindCSS + shadcn/ui + Recharts + TanStack Query v5
+- **Dashboard 页面** - 今日统计卡片、Token 趋势图、模型分布饼图
+- **Sessions 页面** - 会话表格（搜索/排序/分页）、详情面板、归档/删除/恢复
+- **Live 页面** - 实时监控面板（活跃会话 + Token 吞吐 + 技能热度）+ 实时事件流 + 系统活动日志
+- **Skills 页面** - 技能调用分析表格
+- **Import 页面** - 历史数据批量导入（预览 + 进度）
+- **Settings 页面** - CozeLoop 配置管理
+
+---
+
+### 🪟 Tauri 2 桌面应用（全新）
+
+将 Web Dashboard 封装为原生桌面应用（`src-tauri/`，12226 行）。
+
+- **macOS 支持**: 支持 x86_64 / Apple Silicon 双架构
+- **自动构建脚本**: `scripts/build-desktop.sh`、`scripts/dev-desktop.sh`、`scripts/setup-mac.sh`
+- **GitHub Actions CI**: `.github/workflows/build-desktop.yml`
+- **开发模式**: `pnpm tauri dev` 一键启动
+
+---
+
+### 📡 双模式上报（CozeLoop SDK + 开源 HTTP API）
+
+**新增 Sink 抽象层（`src/agent_trace/core/sink.py`，163 行）**:
+
+- **`CozeLoopSink`** - 官方 SDK 上报（原有行为）
+- **`HTTPAPISink`** - 开源 HTTP API 上报（兼容 CozeLoop OpenAPI）
+- **`DualSink`** - 双写模式（同时上报到官方和自建）
+- **`create_sink()`** 工厂函数，根据 `COZELOOP_MODE` 环境变量自动选择
+
+**CLI 新增参数**:
+- `--cozeloop-mode` - 选择上报模式（`official`/`opensource`/`both`）
+- `--no-web` - 禁用 Web Dashboard
+- `--web-port` - 自定义 Web 端口（默认 18765）
+
+---
+
+### 📊 SQLite 本地指标存储（全新）
+
+不再依赖外部服务，所有指标本地持久化到 `~/.agent_trace/metrics.db`。
+
+**核心功能**:
+- `record_turn()` - TurnEnd 时自动写入 Token 统计
+- `record_tool_calls()` - 按 session + skill 聚合工具调用
+- `get_daily_stats()` - 今日 Token/Turn 统计
+- `get_token_trend()` - 24 小时 Token 趋势
+- `get_token_throughput()` - N 分钟 Token 吞吐
+- `get_skill_heatmap()` - 技能热度 Top N
+- `auto_archive_old_sessions()` - 自动归档 15 天未活跃会话
+- `log_activity()` / `get_recent_activities()` - 操作审计
+
+---
+
+### ⚡ EventBus 实时事件推送（全新）
+
+**`src/agent_trace/core/event_bus.py`（53 行）**:
+- 基于 `asyncio.Queue` 的线程安全事件总线
+- `put_sync()` 供同步代码调用（如 monitor 事件处理线程）
+- `get()` 供异步消费者使用（如 WebSocket 转发器）
+
+**`monitor.py` 改动**:
+- 导入 `event_bus`、`Sink`、`get_metrics_store`
+- `__init__` 新增 `sink` 参数，`metrics_store` 实例
+- 新增 `_emit_event()`：事件处理后推送到 EventBus（补充 model_name/turn_index/total_tokens）
+- TurnEnd 时调用 `metrics_store.record_turn()` 持久化到 SQLite
+
+**`session_state.py` 改动**:
+- `__init__` 新增 `sink` 参数
+- `start_turn()` 记录 `_turn_start_time`
+- `end_turn()` 的延迟结束回调中调用 `sink.report_turn_end(self)`
+
+---
+
+### 📦 其他变更
+
+- **`pyproject.toml`** - 新增依赖 `fastapi>=0.110.0`、`uvicorn[standard]>=0.29.0`、`websockets>=12.0`
+- **`.gitignore`** - 添加 `web/dist/`、`web/node_modules/`、`src-tauri/target/` 等构建产物忽略
+- **`cli.py`** - 启动 monitor 后自动在后台线程启动 uvicorn Web 服务器，将 monitor 实例绑定到 status/sessions/live API
+
+---
+
 ## [0.3.5] - 2026-03-18
 
 ### 🐛 关键修复 - Root Span 问题

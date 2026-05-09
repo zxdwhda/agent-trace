@@ -71,3 +71,17 @@ site/
 *.tmp
 *.bak
 *.backup
+refs/
+.refs/
+
+# Desktop app (Tauri + frontend build)
+web/dist/
+web/node_modules/
+src-tauri/target/
+src-tauri/gen/schemas/*.json
+!src-tauri/gen/schemas/.gitkeep
+
+# Runtime / build artifacts
+AgentTrace.app/
+.kimi/
+
